@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ title }}</title>
+<style>
+  :root {
+    --bg: #0f172a; --bg2: #1e293b; --bg3: #334155;
+    --text: #e2e8f0; --text2: #94a3b8; --text3: #64748b;
+    --green: #22c55e; --green-bg: #052e16; --green-border: #16a34a;
+    --red: #ef4444; --red-bg: #450a0a; --red-border: #dc2626;
+    --yellow: #eab308; --yellow-bg: #422006; --yellow-border: #ca8a04;
+    --blue: #3b82f6; --blue-bg: #172554; --blue-border: #2563eb;
+    --purple: #a855f7; --cyan: #06b6d4; --orange: #f97316;
+    --accent: #6366f1;
+    --radius: 12px;
+    --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg); color: var(--text);
+    line-height: 1.6; min-height: 100vh;
+  }
+  /* ── Header ── */
+  .header {
+    background: linear-gradient(135deg, #1e1b4b 0%, #312e81 40%, #4338ca 100%);
+    padding: 2rem 2rem 2.5rem; position: relative; overflow: hidden;
+  }
+  .header::after {
+    content: ''; position: absolute; top: 0; right: 0;
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%);
+  }
+  .header-content { max-width: 1400px; margin: 0 auto; position: relative; z-index: 1; }
+  .header h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
+  .header .subtitle { color: #a5b4fc; font-size: 0.95rem; margin-top: 0.25rem; }
+  .header-meta {
+    display: flex; gap: 2rem; margin-top: 1rem; flex-wrap: wrap;
+  }
+  .meta-item {
+    display: flex; align-items: center; gap: 0.5rem;
+    background: rgba(255,255,255,0.08); padding: 0.4rem 1rem;
+    border-radius: 999px; font-size: 0.85rem;
+  }
+  .meta-item .label { color: #a5b4fc; }
+
+  /* ── Container ── */
+  .container { max-width: 1400px; margin: 0 auto; padding: 1.5rem 2rem 3rem; }
+
+  /* ── Summary Cards ── */
+  .summary-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem; margin: -1.5rem 0 2rem;
+  }
+  .summary-card {
+    background: var(--bg2); border: 1px solid var(--bg3);
+    border-radius: var(--radius); padding: 1.25rem 1.5rem;
+    box-shadow: var(--shadow); text-align: center;
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+  .summary-card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgb(0 0 0 / 0.4); }
+  .summary-card .number {
+    font-size: 2.5rem; font-weight: 800; line-height: 1;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .summary-card.pass .number { background: linear-gradient(135deg, var(--green), #4ade80);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .summary-card.fail .number { background: linear-gradient(135deg, var(--red), #f87171);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .summary-card.skip .number { background: linear-gradient(135deg, var(--yellow), #fbbf24);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .summary-card .label { color: var(--text2); font-size: 0.8rem; text-transform: uppercase;
+    letter-spacing: 0.1em; margin-top: 0.5rem; }
+
+  /* ── Pass Rate Ring ── */
+  .pass-rate-card {
+    background: var(--bg2); border: 1px solid var(--bg3);
+    border-radius: var(--radius); padding: 1.5rem; box-shadow: var(--shadow);
+    display: flex; align-items: center; gap: 2rem; margin-bottom: 2rem;
+  }
+  .ring-container { position: relative; width: 120px; height: 120px; flex-shrink: 0; }
+  .ring-container svg { transform: rotate(-90deg); }
+  .ring-bg { fill: none; stroke: var(--bg3); stroke-width: 8; }
+  .ring-fill { fill: none; stroke-width: 8; stroke-linecap: round;
+    transition: stroke-dashoffset 1s ease; }
+  .ring-text {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 1.8rem; font-weight: 800;
+  }
+  .rate-details h3 { font-size: 1.1rem; margin-bottom: 0.5rem; }
+  .rate-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden;
+    background: var(--bg3); width: 300px; max-width: 100%; }
+  .rate-bar .pass-seg { background: var(--green); }
+  .rate-bar .fail-seg { background: var(--red); }
+  .rate-bar .skip-seg { background: var(--yellow); }
+  .rate-legend { display: flex; gap: 1.5rem; margin-top: 0.5rem; font-size: 0.8rem; }
+  .rate-legend span::before { content: ''; display: inline-block; width: 10px; height: 10px;
+    border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .rate-legend .l-pass::before { background: var(--green); }
+  .rate-legend .l-fail::before { background: var(--red); }
+  .rate-legend .l-skip::before { background: var(--yellow); }
+
+  /* ── Test Flow Diagram ── */
+  .flow-section { margin-bottom: 2rem; }
+  .flow-section h2 { font-size: 1.3rem; margin-bottom: 1rem; display: flex;
+    align-items: center; gap: 0.5rem; }
+  .flow-section h2::before { content: ''; width: 4px; height: 24px;
+    background: linear-gradient(var(--accent), var(--purple)); border-radius: 2px; }
+  .flow-diagram {
+    background: var(--bg2); border: 1px solid var(--bg3);
+    border-radius: var(--radius); padding: 2rem; overflow-x: auto;
+  }
+  .flow-pipeline {
+    display: flex; align-items: center; gap: 0; min-width: 800px;
+    justify-content: center;
+  }
+  .flow-node {
+    padding: 0.75rem 1.25rem; border-radius: 10px; font-size: 0.8rem;
+    font-weight: 600; text-align: center; white-space: nowrap;
+    border: 2px solid; min-width: 100px;
+  }
+  .flow-node.input { background: var(--blue-bg); border-color: var(--blue-border);
+    color: var(--blue); }
+  .flow-node.process { background: var(--green-bg); border-color: var(--green-border);
+    color: var(--green); }
+  .flow-node.measure { background: rgba(168,85,247,0.1); border-color: var(--purple);
+    color: var(--purple); }
+  .flow-node.output { background: rgba(6,182,212,0.1); border-color: var(--cyan);
+    color: var(--cyan); }
+  .flow-node.verify { background: var(--yellow-bg); border-color: var(--yellow-border);
+    color: var(--yellow); }
+  .flow-node.highlight { background: rgba(249,115,22,0.12); border-color: var(--orange);
+    color: var(--orange); box-shadow: 0 0 10px rgba(249,115,22,0.25); }
+  .flow-arrow {
+    color: var(--text3); font-size: 1.5rem; margin: 0 0.25rem; flex-shrink: 0;
+  }
+
+  /* ── Per-category mini path ── */
+  .cat-path {
+    background: var(--bg); border: 1px solid var(--bg3); border-radius: 8px;
+    padding: 0.75rem 1rem; margin: 0 1rem 0.25rem;
+    overflow-x: auto;
+  }
+  .cat-path .flow-pipeline { min-width: auto; gap: 0; justify-content: flex-start; }
+  .cat-path .flow-node { padding: 0.4rem 0.7rem; font-size: 0.72rem; min-width: 70px; }
+  .cat-path .flow-arrow { font-size: 1.1rem; }
+  .cat-path-label {
+    font-size: 0.7rem; color: var(--text3); text-transform: uppercase;
+    letter-spacing: 0.08em; margin-bottom: 0.4rem;
+  }
+
+  /* ── Category Sections ── */
+  .category-section { margin-bottom: 1.5rem; }
+  .category-header {
+    background: var(--bg2); border: 1px solid var(--bg3);
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding: 1rem 1.5rem; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center;
+    transition: background 0.2s;
+  }
+  .category-header:hover { background: var(--bg3); }
+  .category-header h3 { font-size: 1rem; display: flex; align-items: center; gap: 0.75rem; }
+  .category-icon {
+    width: 32px; height: 32px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem;
+  }
+  .cat-stats { display: flex; gap: 0.75rem; }
+  .cat-badge {
+    padding: 0.2rem 0.6rem; border-radius: 999px;
+    font-size: 0.75rem; font-weight: 600;
+  }
+  .cat-badge.pass { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+  .cat-badge.fail { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+  .cat-badge.skip { background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow-border); }
+
+  .category-body {
+    border: 1px solid var(--bg3); border-top: none;
+    border-radius: 0 0 var(--radius) var(--radius);
+    overflow: hidden;
+  }
+  .test-row {
+    display: grid; grid-template-columns: 40px 1fr auto 80px 80px;
+    padding: 0.6rem 1.5rem; border-bottom: 1px solid var(--bg3);
+    align-items: center; font-size: 0.85rem;
+    transition: background 0.15s;
+  }
+  .test-row:hover { background: rgba(255,255,255,0.02); }
+  .test-row:last-child { border-bottom: none; }
+  .test-row .status-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    display: inline-block;
+  }
+  .test-row .status-dot.passed { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .test-row .status-dot.failed { background: var(--red); box-shadow: 0 0 6px var(--red); }
+  .test-row .status-dot.skipped { background: var(--yellow); }
+  .test-name { color: var(--text); display: flex; align-items: center;
+    gap: 0.5rem; flex-wrap: wrap; }
+  .test-name .fn-name { font-weight: 500; }
+  .param-pill {
+    display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px;
+    font-size: 0.72rem; font-weight: 600; font-family: 'Cascadia Code', 'Fira Code', monospace;
+    background: var(--blue-bg); border: 1px solid var(--blue-border);
+    color: var(--blue); white-space: nowrap;
+  }
+  .test-duration { color: var(--text3); text-align: right; }
+  .test-status {
+    text-align: center; font-weight: 600; text-transform: uppercase;
+    font-size: 0.75rem; letter-spacing: 0.05em;
+  }
+  .test-status.passed { color: var(--green); }
+  .test-status.failed { color: var(--red); }
+  .test-status.skipped { color: var(--yellow); }
+
+  /* ── Log toggle button ── */
+  .log-btn {
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    padding: 0.2rem 0.6rem; border-radius: 6px; cursor: pointer;
+    font-size: 0.72rem; font-weight: 600; border: 1px solid var(--bg3);
+    background: var(--bg); color: var(--text3); white-space: nowrap;
+    transition: background 0.2s, color 0.2s;
+  }
+  .log-btn:hover { background: var(--bg3); color: var(--text); }
+  .log-btn.has-error { border-color: var(--red-border); color: var(--red); }
+  .log-btn.has-warn { border-color: var(--yellow-border); color: var(--yellow); }
+
+  /* ── Collapsible log panel ── */
+  .test-logs {
+    display: none; grid-column: 1 / -1;
+    margin: 0 1.5rem 0.5rem; border-radius: 8px; overflow: hidden;
+  }
+  .test-logs.open { display: block; }
+  .log-section {
+    padding: 0.6rem 1rem;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.76rem; white-space: pre-wrap; word-break: break-word;
+    max-height: 250px; overflow-y: auto;
+  }
+  .log-section.error-log {
+    background: var(--red-bg); border: 1px solid var(--red-border);
+    color: #fca5a5;
+  }
+  .log-section.warn-log {
+    background: var(--yellow-bg); border: 1px solid var(--yellow-border);
+    color: #fbbf24;
+  }
+  .log-section.info-log {
+    background: var(--bg2); border: 1px solid var(--bg3);
+    color: var(--text2);
+  }
+  .log-section + .log-section { margin-top: 0.35rem; }
+  .log-section-label {
+    font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; margin-bottom: 0.3rem; opacity: 0.7;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+  }
+
+  /* ── Footer ── */
+  .footer {
+    text-align: center; padding: 2rem; color: var(--text3);
+    font-size: 0.8rem; border-top: 1px solid var(--bg3);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .container { padding: 1rem; }
+    .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    .test-row { grid-template-columns: 30px 1fr auto 60px; }
+    .test-duration { display: none; }
+    .flow-pipeline { min-width: 600px; }
+  }
+
+  /* ── Animations ── */
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); } }
+  .summary-card, .category-section, .pass-rate-card {
+    animation: fadeIn 0.5s ease forwards;
+  }
+  .category-section:nth-child(2) { animation-delay: 0.1s; }
+  .category-section:nth-child(3) { animation-delay: 0.2s; }
+
+  /* ── Toggle ── */
+  .toggle-icon { transition: transform 0.3s; font-size: 1.2rem; color: var(--text3); }
+  .category-section.collapsed .toggle-icon { transform: rotate(-90deg); }
+  .category-section.collapsed .category-body { display: none; }
+</style>
+</head>
+<body>
+
+<!-- ═══════ HEADER ═══════ -->
+<div class="header">
+  <div class="header-content">
+    <h1>&#x1F50A; DM-NAX DSP Test Report</h1>
+    <div class="subtitle">Automated DSP Verification Suite &mdash; Nightly Build Validation</div>
+    <div class="header-meta">
+      <div class="meta-item"><span class="label">Device:</span> {{ device_info.get('model', 'N/A') }}</div>
+      <div class="meta-item"><span class="label">IP:</span> {{ device_info.get('ip', 'N/A') }}</div>
+      <div class="meta-item"><span class="label">Firmware:</span> {{ device_info.get('version', 'N/A') }}</div>
+      <div class="meta-item"><span class="label">Generated:</span> {{ generated_at }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- ═══════ SUMMARY CARDS ═══════ -->
+<div class="summary-grid">
+  <div class="summary-card">
+    <div class="number">{{ summary.total }}</div>
+    <div class="label">Total Tests</div>
+  </div>
+  <div class="summary-card pass">
+    <div class="number">{{ summary.passed }}</div>
+    <div class="label">Passed</div>
+  </div>
+  <div class="summary-card fail">
+    <div class="number">{{ summary.failed }}</div>
+    <div class="label">Failed</div>
+  </div>
+  <div class="summary-card skip">
+    <div class="number">{{ summary.skipped }}</div>
+    <div class="label">Skipped</div>
+  </div>
+  <div class="summary-card">
+    <div class="number">{{ summary.duration }}s</div>
+    <div class="label">Duration</div>
+  </div>
+</div>
+
+<!-- ═══════ PASS RATE ═══════ -->
+{% set circumference = 339.292 %}
+{% set offset = circumference - (circumference * summary.pass_rate / 100) %}
+{% set pass_pct = summary.passed * 100 / summary.total if summary.total > 0 else 0 %}
+{% set fail_pct = summary.failed * 100 / summary.total if summary.total > 0 else 0 %}
+{% set skip_pct = summary.skipped * 100 / summary.total if summary.total > 0 else 0 %}
+<div class="pass-rate-card">
+  <div class="ring-container">
+    <svg width="120" height="120" viewBox="0 0 120 120">
+      <circle class="ring-bg" cx="60" cy="60" r="54"/>
+      <circle class="ring-fill" cx="60" cy="60" r="54"
+        stroke="{% if summary.pass_rate >= 90 %}var(--green){% elif summary.pass_rate >= 70 %}var(--yellow){% else %}var(--red){% endif %}"
+        stroke-dasharray="{{ circumference }}"
+        stroke-dashoffset="{{ offset }}"/>
+    </svg>
+    <div class="ring-text" style="color: {% if summary.pass_rate >= 90 %}var(--green){% elif summary.pass_rate >= 70 %}var(--yellow){% else %}var(--red){% endif %}">
+      {{ summary.pass_rate }}%
+    </div>
+  </div>
+  <div class="rate-details">
+    <h3>Overall Pass Rate</h3>
+    <div class="rate-bar">
+      <div class="pass-seg" style="width: {{ pass_pct }}%"></div>
+      <div class="fail-seg" style="width: {{ fail_pct }}%"></div>
+      <div class="skip-seg" style="width: {{ skip_pct }}%"></div>
+    </div>
+    <div class="rate-legend">
+      <span class="l-pass">{{ summary.passed }} passed</span>
+      <span class="l-fail">{{ summary.failed }} failed</span>
+      <span class="l-skip">{{ summary.skipped }} skipped</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ TEST FLOW DIAGRAM ═══════ -->
+<div class="flow-section">
+  <h2>Test Architecture</h2>
+  <div class="flow-diagram">
+    <div class="flow-pipeline">
+      <div class="flow-node input">&#x1F3B5; Signal<br>Generator<br><small>SSH: dsp tone</small></div>
+      <div class="flow-arrow">&#x25B6;</div>
+      <div class="flow-node process">&#x1F39B;&#xFE0F; Mixer<br>Matrix<br><small>SSH: dsp mix</small></div>
+      <div class="flow-arrow">&#x25B6;</div>
+      <div class="flow-node highlight">&#x1F50A; Zone Audio<br>Properties<br><small>REST API SET</small></div>
+      <div class="flow-arrow">&#x25B6;</div>
+      <div class="flow-node process">&#x2699;&#xFE0F; DSP<br>Processing<br><small>firmware</small></div>
+      <div class="flow-arrow">&#x25B6;</div>
+      <div class="flow-node measure">&#x1F4CA; DSP Internal<br>Meter<br><small>SSH: dsp &rarr; output_db</small></div>
+      <div class="flow-arrow">&#x25B6;</div>
+      <div class="flow-node verify">&#x2705; Assert<br>Level / Readback<br><small>pytest</small></div>
+    </div>
+    <div style="text-align:center; margin-top:1.5rem; color:var(--text3); font-size:0.82rem;">
+      <em>Tests use two verification methods: (1) DSP firmware&rsquo;s internal level meters via SSH &lsquo;dsp&rsquo; command, and (2) CresNext REST API GET readback &mdash; no external measurement hardware</em>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ TEST RESULTS BY CATEGORY ═══════ -->
+<div class="flow-section">
+  <h2>Test Results by Category</h2>
+</div>
+
+{% for cat_name, cat_data in categories.items() %}
+{% set cat_idx = loop.index %}
+<div class="category-section" id="cat-{{ cat_idx }}">
+  <div class="category-header" onclick="toggleCategory('cat-{{ cat_idx }}')">
+    <h3>
+      <span class="category-icon" style="background:
+        {% if cat_data.fail > 0 %}var(--red-bg){% else %}var(--green-bg){% endif %};">
+        {% if cat_data.fail > 0 %}&#x274C;{% else %}&#x2705;{% endif %}
+      </span>
+      {{ cat_name }}
+    </h3>
+    <div style="display:flex; align-items:center; gap:1rem;">
+      <div class="cat-stats">
+        {% if cat_data.pass > 0 %}<span class="cat-badge pass">{{ cat_data.pass }} pass</span>{% endif %}
+        {% if cat_data.fail > 0 %}<span class="cat-badge fail">{{ cat_data.fail }} fail</span>{% endif %}
+        {% if cat_data.skip > 0 %}<span class="cat-badge skip">{{ cat_data.skip }} skip</span>{% endif %}
+      </div>
+      <span class="toggle-icon">&#x25BC;</span>
+    </div>
+  </div>
+  <div class="category-body">
+    {% if cat_data.path %}
+    <div class="cat-path">
+      <div class="cat-path-label">Test Signal Path</div>
+      <div class="flow-pipeline">
+        {% for node in cat_data.path %}
+          {% if not loop.first %}<div class="flow-arrow">&#x25B6;</div>{% endif %}
+          <div class="flow-node {{ node[1] }}">{{ node[0] }}</div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    {% for test in cat_data.tests %}
+    {% set full_name = test.nodeid.split('::')[-1] %}
+    {% set has_params = '[' in full_name %}
+    {% set fn_name = full_name.split('[')[0] if has_params else full_name %}
+    {% set param_str = full_name.split('[')[1][:-1] if has_params else '' %}
+    {% set call_data = test.get('call', {}) if test.get('call') is mapping else {} %}
+    {% set setup_data = test.get('setup', {}) if test.get('setup') is mapping else {} %}
+    {% set teardown_data = test.get('teardown', {}) if test.get('teardown') is mapping else {} %}
+    {% set has_error = call_data.get('longrepr') %}
+    {% set has_call_log = call_data.get('log') %}
+    {% set has_setup_out = setup_data.get('stdout') %}
+    {% set has_td_log = teardown_data.get('log') %}
+    {% set has_any_log = has_error or has_call_log or has_setup_out or has_td_log %}
+    {% set log_id = 'log-' ~ cat_idx ~ '-' ~ loop.index %}
+    <div class="test-row">
+      <span class="status-dot {{ test.outcome }}"></span>
+      <div class="test-name">
+        <span class="fn-name">{{ fn_name }}</span>
+        {% if has_params %}
+        <span class="param-pill">{{ param_str }}</span>
+        {% endif %}
+      </div>
+      {% if has_any_log %}
+      <span class="log-btn{% if has_error %} has-error{% elif has_call_log %} has-warn{% endif %}"
+            onclick="toggleLog('{{ log_id }}')">&#x1F4CB;{% if has_error %} error{% elif has_call_log %} log{% else %} info{% endif %}</span>
+      {% else %}
+      <span></span>
+      {% endif %}
+      <div class="test-duration">{{ "%.2f" | format(test.get('duration', 0)) }}s</div>
+      <div class="test-status {{ test.outcome }}">{{ test.outcome }}</div>
+    </div>
+    {% if has_any_log %}
+    <div class="test-logs" id="{{ log_id }}">
+      {% if has_error %}
+      <div class="log-section error-log">
+        <div class="log-section-label">Failure</div>{{ call_data.longrepr }}</div>
+      {% endif %}
+      {% if has_call_log %}
+      <div class="log-section warn-log">
+        <div class="log-section-label">Call Log ({{ call_data.log | length }} entries)</div>{% for entry in call_data.log %}[{{ entry.levelname }}] {{ entry.filename }}:{{ entry.lineno }} {{ entry.msg }}
+{% endfor %}</div>
+      {% endif %}
+      {% if has_setup_out %}
+      <div class="log-section info-log">
+        <div class="log-section-label">Setup Output</div>{{ setup_data.stdout }}</div>
+      {% endif %}
+      {% if has_td_log %}
+      <div class="log-section warn-log">
+        <div class="log-section-label">Teardown Log ({{ teardown_data.log | length }} entries)</div>{% for entry in teardown_data.log %}[{{ entry.levelname }}] {{ entry.filename }}:{{ entry.lineno }} {{ entry.msg }}
+{% endfor %}</div>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}
+
+</div><!-- container -->
+
+<!-- ═══════ FOOTER ═══════ -->
+<div class="footer">
+  <p>DM-NAX DSP Test Suite &bull; Crestron Electronics &bull; Automated Nightly Verification</p>
+  <p>Report generated {{ generated_at }}</p>
+</div>
+
+<script>
+function toggleCategory(id) {
+  document.getElementById(id).classList.toggle('collapsed');
+}
+function toggleLog(id) {
+  var el = document.getElementById(id);
+  if (el) el.classList.toggle('open');
+}
+</script>
+
+</body>
+</html>

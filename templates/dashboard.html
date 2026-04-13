@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DM-NAX Test Dashboard</title>
+<style>
+  :root {
+    --bg: #0f172a; --bg2: #1e293b; --bg3: #334155;
+    --text: #e2e8f0; --text2: #94a3b8; --text3: #64748b;
+    --green: #22c55e; --red: #ef4444; --yellow: #eab308;
+    --blue: #3b82f6; --accent: #6366f1; --purple: #a855f7;
+    --radius: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg);
+    color: var(--text); }
+
+  /* ── Nav ── */
+  .nav {
+    background: linear-gradient(90deg, #1e1b4b, #312e81);
+    padding: 1rem 2rem; display: flex; align-items: center;
+    justify-content: space-between; border-bottom: 1px solid var(--bg3);
+  }
+  .nav h1 { font-size: 1.3rem; display: flex; align-items: center; gap: 0.75rem; }
+  .nav-links { display: flex; gap: 1rem; }
+  .nav-links a {
+    color: #a5b4fc; text-decoration: none; padding: 0.4rem 1rem;
+    border-radius: 999px; font-size: 0.85rem; transition: all 0.2s;
+  }
+  .nav-links a:hover, .nav-links a.active {
+    background: rgba(255,255,255,0.1); color: white;
+  }
+
+  .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+
+  /* ── Health Banner ── */
+  .health-banner {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem;
+  }
+  .health-card {
+    background: var(--bg2); border: 1px solid var(--bg3);
+    border-radius: var(--radius); padding: 1.5rem; text-align: center;
+  }
+  .health-card .big { font-size: 2.2rem; font-weight: 800; }
+  .health-card .label { color: var(--text2); font-size: 0.8rem;
+    text-transform: uppercase; letter-spacing: 0.1em; margin-top: 0.25rem; }
+
+  /* ── History Table ── */
+  .section-title {
+    font-size: 1.2rem; margin-bottom: 1rem;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .section-title::before {
+    content: ''; width: 4px; height: 22px;
+    background: linear-gradient(var(--accent), var(--purple));
+    border-radius: 2px;
+  }
+  .history-table {
+    width: 100%; border-collapse: collapse; background: var(--bg2);
+    border: 1px solid var(--bg3); border-radius: var(--radius); overflow: hidden;
+  }
+  .history-table th {
+    background: var(--bg3); padding: 0.75rem 1rem; text-align: left;
+    font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text2);
+  }
+  .history-table td {
+    padding: 0.75rem 1rem; border-bottom: 1px solid var(--bg3);
+    font-size: 0.88rem;
+  }
+  .history-table tr:hover td { background: rgba(255,255,255,0.02); }
+  .history-table tr:last-child td { border-bottom: none; }
+  .badge {
+    display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px;
+    font-size: 0.75rem; font-weight: 600;
+  }
+  .badge.pass { background: rgba(34,197,94,0.15); color: var(--green);
+    border: 1px solid rgba(34,197,94,0.3); }
+  .badge.fail { background: rgba(239,68,68,0.15); color: var(--red);
+    border: 1px solid rgba(239,68,68,0.3); }
+  .badge.mixed { background: rgba(234,179,8,0.15); color: var(--yellow);
+    border: 1px solid rgba(234,179,8,0.3); }
+
+  /* ── Trend Chart ── */
+  .chart-container {
+    background: var(--bg2); border: 1px solid var(--bg3);
+    border-radius: var(--radius); padding: 1.5rem; margin-bottom: 2rem;
+    min-height: 200px;
+  }
+  .trend-bars {
+    display: flex; align-items: flex-end; gap: 4px; height: 160px; padding-top: 1rem;
+  }
+  .trend-bar-group { flex: 1; display: flex; flex-direction: column;
+    align-items: center; gap: 2px; }
+  .trend-bar {
+    width: 100%; max-width: 30px; border-radius: 4px 4px 0 0;
+    transition: height 0.6s ease;
+  }
+  .trend-bar.pass { background: linear-gradient(var(--green), #15803d); }
+  .trend-bar.fail { background: linear-gradient(var(--red), #991b1b); }
+  .trend-label { font-size: 0.6rem; color: var(--text3); margin-top: 4px;
+    writing-mode: vertical-lr; text-orientation: mixed; }
+
+  .footer { text-align: center; padding: 2rem; color: var(--text3); font-size: 0.8rem; }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <h1>&#x1F50A; DM-NAX Test Dashboard</h1>
+  <div class="nav-links">
+    <a href="/" class="active">Dashboard</a>
+    <a href="/history">History</a>
+    <a href="/devices">Devices</a>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- ═══════ HEALTH ═══════ -->
+<div class="health-banner">
+  <div class="health-card">
+    <div class="big" style="color: var(--accent);">{{ total_runs }}</div>
+    <div class="label">Total Runs</div>
+  </div>
+  <div class="health-card">
+    <div class="big" style="color: var(--green);">{{ latest_pass_rate }}%</div>
+    <div class="label">Latest Pass Rate</div>
+  </div>
+  <div class="health-card">
+    <div class="big" style="color:
+      {% if streak_status == 'passing' %}var(--green){% else %}var(--red){% endif %};">
+      {{ streak_count }}
+    </div>
+    <div class="label">{{ streak_status | title }} Streak</div>
+  </div>
+  <div class="health-card">
+    <div class="big" style="color: var(--text2);">{{ latest_device }}</div>
+    <div class="label">Latest Device</div>
+  </div>
+</div>
+
+<!-- ═══════ TREND CHART ═══════ -->
+<div class="section-title">Pass/Fail Trend (Last {{ runs | length }} Runs)</div>
+<div class="chart-container">
+  <div class="trend-bars">
+    {% for run in runs[-30:] %}
+    <div class="trend-bar-group">
+      <div class="trend-bar pass" style="height: {{ run.pass_pct * 1.5 }}px;"
+           title="{{ run.passed }}/{{ run.total }} passed"></div>
+      {% if run.failed > 0 %}
+      <div class="trend-bar fail" style="height: {{ run.fail_pct * 1.5 }}px;"
+           title="{{ run.failed }} failed"></div>
+      {% endif %}
+      <div class="trend-label">{{ run.date_short }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- ═══════ HISTORY ═══════ -->
+<div class="section-title">Run History</div>
+<table class="history-table">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Device</th>
+      <th>Firmware</th>
+      <th>Total</th>
+      <th>Passed</th>
+      <th>Failed</th>
+      <th>Pass Rate</th>
+      <th>Duration</th>
+      <th>Status</th>
+      <th>Report</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for run in runs | reverse %}
+    <tr>
+      <td>{{ run.date }}</td>
+      <td>{{ run.device }}</td>
+      <td><code style="color:var(--text2)">{{ run.firmware }}</code></td>
+      <td>{{ run.total }}</td>
+      <td style="color:var(--green)">{{ run.passed }}</td>
+      <td style="color:{% if run.failed > 0 %}var(--red){% else %}var(--text3){% endif %}">{{ run.failed }}</td>
+      <td>
+        <span style="color:{% if run.pass_rate >= 90 %}var(--green){% elif run.pass_rate >= 70 %}var(--yellow){% else %}var(--red){% endif %}">
+          {{ run.pass_rate }}%
+        </span>
+      </td>
+      <td>{{ run.duration }}s</td>
+      <td>
+        {% if run.failed == 0 %}
+          <span class="badge pass">PASS</span>
+        {% elif run.passed > 0 %}
+          <span class="badge mixed">MIXED</span>
+        {% else %}
+          <span class="badge fail">FAIL</span>
+        {% endif %}
+      </td>
+      <td><a href="/report/{{ run.id }}">View</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+</div>
+
+<div class="footer">
+  DM-NAX DSP Test Suite &bull; Crestron Electronics &bull; Auto-refreshes every 60s
+</div>
+
+<script>
+  // Auto-refresh every 60 seconds
+  setTimeout(() => location.reload(), 60000);
+</script>
+
+</body>
+</html>
