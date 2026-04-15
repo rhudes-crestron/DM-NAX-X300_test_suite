@@ -1,0 +1,140 @@
+# ═══════════════════════════════════════════════════════════════
+#  DM-NAX Test Suite — Test Manifest
+# ═══════════════════════════════════════════════════════════════
+#  This file defines WHICH tests run on WHICH devices.
+#  The orchestrator reads this manifest and launches parallel
+#  pytest sessions — one per device.
+#
+#  To add a new device:
+#    1. Add its hardware profile in devices.yaml
+#    2. Add a test_targets entry below
+#    3. The orchestrator picks it up automatically
+#
+#  To add a new test for an existing device:
+#    1. Create the test file in tests/
+#    2. Add it to the device's test list below
+#    3. (Optional) add to skip_tests if it doesn't apply to some devices
+# ═══════════════════════════════════════════════════════════════
+
+# ── Global defaults applied to all devices unless overridden ──
+defaults:
+  skip_upgrade: false
+  timeout_minutes: 60        # max wall-clock time per device run
+  retry_failed: 0            # re-run failed tests N times (0=disable)
+  results_retention_days: 30 # auto-purge results older than this
+  notify_on_failure: true
+  notify_email: "dmnax-test-results@crestron.com"
+
+# ── Shared test groups (reuse across devices) ─────────────────
+test_groups:
+  audio_quality: &audio_quality
+    - tests/test_freq_response.py
+    - tests/test_level_linearity.py
+    - tests/test_signal_to_noise.py
+    - tests/test_clipping.py
+
+  dsp_processing: &dsp_processing
+    - tests/test_eq.py
+    - tests/test_bass_treble.py
+    - tests/test_loudness.py
+    - tests/test_tone_profiles.py
+    - tests/test_night_mode.py
+    - tests/test_delay.py
+
+  volume_controls: &volume_controls
+    - tests/test_volume.py
+    - tests/test_mute.py
+    - tests/test_balance.py
+
+  signal_routing: &signal_routing
+    - tests/test_signal_routing.py
+    - tests/test_input_mute.py
+    - tests/test_crosstalk.py
+
+  amplifier: &amplifier
+    - tests/test_amp_health.py
+    - tests/test_bridging.py
+    - tests/test_speaker_protect.py
+
+  streaming: &streaming
+    - tests/test_streaming.py
+
+  firmware: &firmware
+    - tests/test_device_upgrade.py
+
+# ── Per-device test targets ───────────────────────────────────
+# Each entry maps a device profile (from devices.yaml) to its
+# test list, optional firmware path, and per-device overrides.
+test_targets:
+
+  DM-NAX-4ZSA:
+    enabled: true
+    device: "DM-NAX-4ZSA"          # profile name in devices.yaml
+    firmware_file: ""               # auto-detect from firmware_dir
+    tests:
+      - *firmware
+      - *audio_quality
+      - *dsp_processing
+      - *volume_controls
+      - *signal_routing
+      - *amplifier
+      - *streaming
+    skip_tests:
+      - tests/test_input_compensation.py   # not supported on fw21
+    extra_pytest_args: ""
+
+  DM-NAX-4ZSP:
+    enabled: true
+    device: "DM-NAX-4ZSP"
+    firmware_file: ""
+    tests:
+      - *firmware
+      - *audio_quality
+      - *dsp_processing
+      - *volume_controls
+      - *signal_routing
+      - *amplifier
+      - *streaming
+    skip_tests:
+      - tests/test_input_compensation.py   # fw42 uses ampctrl, not dsp gain
+    extra_pytest_args: ""
+
+  DM-NAX-8ZSA:
+    enabled: true
+    device: "DM-NAX-8ZSA"
+    firmware_file: ""
+    tests:
+      - *firmware
+      - *audio_quality
+      - *dsp_processing
+      - *volume_controls
+      - *signal_routing
+      - *amplifier
+      - *streaming
+    skip_tests:
+      - tests/test_input_compensation.py
+    extra_pytest_args: ""
+
+  # ── Template for adding new devices ──
+  # DM-NAX-NEW:
+  #   enabled: false
+  #   device: "DM-NAX-NEW"
+  #   firmware_file: "/path/to/firmware.puf"
+  #   tests:
+  #     - *firmware
+  #     - *audio_quality
+  #     - *dsp_processing
+  #   skip_tests: []
+  #   extra_pytest_args: "--category=dsp"
+  #   timeout_minutes: 45
+
+# ── Schedule (consumed by cron/systemd timer) ─────────────────
+schedule:
+  nightly:
+    cron: "0 1 * * *"             # 1:00 AM daily
+    targets: ["DM-NAX-4ZSA", "DM-NAX-4ZSP", "DM-NAX-8ZSA"]
+  weekly_full:
+    cron: "0 3 * * 0"             # 3:00 AM Sunday
+    targets: ["DM-NAX-4ZSA", "DM-NAX-4ZSP", "DM-NAX-8ZSA"]
+  on_demand:
+    targets: []                   # filled at runtime via CLI

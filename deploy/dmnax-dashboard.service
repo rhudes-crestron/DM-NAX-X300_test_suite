@@ -1,0 +1,20 @@
+[Unit]
+Description=DM-NAX DSP Test Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=dmnax-test
+Group=dmnax-test
+WorkingDirectory=/opt/dmnax-test-suite
+ExecStart=/opt/dmnax-test-suite/venv/bin/gunicorn \
+    --bind 0.0.0.0:8080 \
+    --workers 4 \
+    --timeout 120 \
+    "dashboard:create_app()"
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

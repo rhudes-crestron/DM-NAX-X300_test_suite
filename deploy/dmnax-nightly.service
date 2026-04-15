@@ -1,0 +1,16 @@
+[Unit]
+Description=DM-NAX Nightly Test Run
+Wants=dmnax-nightly.timer
+
+[Service]
+Type=oneshot
+User=dmnax-test
+Group=dmnax-test
+WorkingDirectory=/opt/dmnax-test-suite
+ExecStart=/opt/dmnax-test-suite/venv/bin/python3 orchestrator.py --schedule nightly
+StandardOutput=append:/var/log/dmnax-test/nightly.log
+StandardError=append:/var/log/dmnax-test/nightly.log
+TimeoutStartSec=7200
+
+[Install]
+WantedBy=multi-user.target
