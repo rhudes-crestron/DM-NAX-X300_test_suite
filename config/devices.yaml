@@ -89,7 +89,7 @@ devices:
       audio_server_port: 8088
 
   DM-NAX-4ZSP:
-    ip: "192.168.1.179"
+    ip: "dm-nax-4zsp-00107fca06ff"
     username: "admin"
     password: "crestron"
     model: "4ZSP"
