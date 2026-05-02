@@ -50,38 +50,50 @@ class CresNextClient:
         ) from last_exc
 
     def _try_connect(self):
-        """Single connect attempt."""
+        """Single connect attempt.
+
+        Protocol negotiation:
+          - Try HTTPS first (fw42 devices: 4ZSP, 8ZSA).
+          - If HTTPS fails (connection refused / SSL error), fall back to HTTP
+            (fw21 devices: 4ZSA, which may not serve HTTPS on port 443).
+          - POST credentials to the same base URL that successfully served
+            the GET, so the session cookie is valid for the POST.
+        """
         self._session = requests.Session()
         self._session.verify = False
 
+        # Determine working base URL: HTTPS preferred, HTTP fallback.
         base = f"https://{self.ip}"
+        for candidate_base in (f"https://{self.ip}", f"http://{self.ip}"):
+            login_headers = {
+                "Origin": candidate_base,
+                "Referer": f"{candidate_base}/index_banner.html",
+            }
+            try:
+                log_event("CRESNEXT", f"GET {candidate_base}/userlogin.html")
+                r = self._session.get(
+                    f"{candidate_base}/userlogin.html",
+                    headers=login_headers,
+                    timeout=15,
+                    allow_redirects=True,
+                )
+                # Successful response — use this base for the POST too.
+                base = candidate_base
+                break
+            except (requests.exceptions.ConnectionError,
+                    requests.exceptions.SSLError,
+                    requests.exceptions.Timeout):
+                log_event("CRESNEXT",
+                          f"GET {candidate_base}/userlogin.html failed, trying next")
+                continue
+
         login_headers = {
             "Origin": base,
             "Referer": f"{base}/index_banner.html",
         }
 
-        # GET the login page to obtain session cookie.
-        # Try HTTP first; some devices (4ZSP) redirect 301 → HTTPS,
-        # so fall back to HTTPS if the HTTP attempt fails or redirects.
-        try:
-            log_event("CRESNEXT", f"GET http://{self.ip}/userlogin.html")
-            r = self._session.get(
-                f"http://{self.ip}/userlogin.html", headers=login_headers,
-                timeout=15, allow_redirects=False,
-            )
-            if r.status_code in (301, 302):
-                log_event("CRESNEXT", f"GET https://{self.ip}/userlogin.html (redirect)")
-                self._session.get(
-                    f"{base}/userlogin.html", headers=login_headers, timeout=15,
-                )
-        except requests.exceptions.ConnectionError:
-            log_event("CRESNEXT", f"GET https://{self.ip}/userlogin.html (fallback)")
-            self._session.get(
-                f"{base}/userlogin.html", headers=login_headers, timeout=15,
-            )
-
-        # POST credentials via HTTPS
-        log_event("CRESNEXT", f"POST https://{self.ip}/userlogin.html (login)")
+        # POST credentials to the same base URL that served the GET.
+        log_event("CRESNEXT", f"POST {base}/userlogin.html (login)")
         r = self._session.post(
             f"{base}/userlogin.html",
             data={"login": self.username, "passwd": self.password},

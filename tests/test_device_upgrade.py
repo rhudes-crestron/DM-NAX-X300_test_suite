@@ -32,10 +32,14 @@ logger = logging.getLogger(__name__)
 def _find_firmware_file(firmware_dir, model):
     """Find the latest firmware file for the given device model.
 
-    Search patterns:
-      4ZSA  →  dm-nax-4zsa*.zip
-      4ZSP  →  dm-nax-trunk-nightly*.puf  (same as 8ZSA)
-      8ZSA  →  dm-nax*nightly*.puf  /  dm-nax-trunk-nightly*.puf
+    Selects the most recently modified file matching the pattern so the
+    correct nightly drop is always picked regardless of version/date
+    formatting in the filename.
+
+    Expected filename examples (change daily):
+      4ZSA  →  dm-nax-4zsa_0.6696.02239_r599365.zip
+      8ZSA  →  dm-nax-trunk-nightly_2026.05.01.puf
+      4ZSP  →  dm-nax-trunk-nightly_2026.05.01.puf  (same drop as 8ZSA)
     """
     patterns_by_model = {
         "4ZSA": [
@@ -54,9 +58,19 @@ def _find_firmware_file(firmware_dir, model):
         ],
     }
     for pattern in patterns_by_model.get(model, []):
-        matches = sorted(glob.glob(os.path.join(firmware_dir, pattern)))
+        matches = glob.glob(os.path.join(firmware_dir, pattern))
         if matches:
-            return matches[-1]  # latest by name
+            # Pick newest by file modification time — reliable for both
+            # date-stamped (.puf) and version-stamped (.zip) filenames.
+            latest = max(matches, key=os.path.getmtime)
+            logger.info(
+                "Firmware auto-detect: model=%s dir=%s pattern=%s → %s",
+                model, firmware_dir, pattern, os.path.basename(latest),
+            )
+            return latest
+    logger.warning(
+        "Firmware auto-detect: no file found for model=%s in %s", model, firmware_dir
+    )
     return None
 
 

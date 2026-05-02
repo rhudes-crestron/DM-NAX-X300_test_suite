@@ -4,7 +4,7 @@ devices:
   DM-NAX-4ZSA:
     ip: "192.168.1.157"
     username: "admin"
-    password: "crestron"
+    password: "admin123"
     model: "4ZSA"
     zones: 4
     amp_outputs: ["A1L","A1R","A2L","A2R","A3L","A3R","A4L","A4R"]
