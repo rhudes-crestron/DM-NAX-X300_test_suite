@@ -14,6 +14,8 @@ import socket
 import logging
 import paramiko
 
+from lib.test_trace import log_event
+
 logger = logging.getLogger(__name__)
 
 
@@ -128,6 +130,7 @@ class FirmwareUpgrader:
             raise FileNotFoundError(f"Firmware file not found: {self.firmware_path}")
 
         file_size = os.path.getsize(self.firmware_path)
+        log_event("UPGRADE", f"SFTP upload: {self.firmware_filename} ({file_size} bytes) → {self.ip}:{self.remote_dir}/")
         logger.info(
             "Uploading '%s' (%d bytes) to %s:%s/",
             self.firmware_filename, file_size, self.ip, self.remote_dir,
@@ -169,6 +172,7 @@ class FirmwareUpgrader:
                     f"remote={remote_stat.st_size}"
                 )
             logger.info("Upload verified: %d bytes", remote_stat.st_size)
+            log_event("UPGRADE", f"upload verified: {remote_stat.st_size} bytes OK")
 
             sftp.close()
             self._upload_success = True
@@ -201,6 +205,7 @@ class FirmwareUpgrader:
 
     def _execute_imgupd(self, client):
         """4ZSA: issue 'imgupd' — device picks up .zip from firmware/."""
+        log_event("UPGRADE", f"SSH cmd: imgupd on {self.ip}")
         logger.info(
             "Executing 'imgupd' on %s (timeout=%ds) …",
             self.ip, self.IMGUPD_CMD_TIMEOUT,
@@ -209,18 +214,21 @@ class FirmwareUpgrader:
         logger.info("imgupd response: %s", out.strip()[:500])
         if "error" in out.lower():
             raise RuntimeError(f"imgupd error: {out.strip()}")
+        log_event("UPGRADE", f"imgupd accepted: {out.strip()[:80]}")
         self._upgrade_started = True
         return out
 
     def _execute_puf(self, client):
         """8ZSA: issue 'puf <filename> ALL -D -V'."""
         cmd = f"puf {self.firmware_filename} ALL -D -V"
+        log_event("UPGRADE", f"SSH cmd: {cmd} on {self.ip}")
         logger.info(
             "Executing '%s' on %s (timeout=%ds) …",
             cmd, self.ip, self.PUF_CMD_TIMEOUT,
         )
         out, _ = self._ssh_execute(client, cmd, timeout=self.PUF_CMD_TIMEOUT)
         logger.info("PUF response: %s", out.strip()[:500])
+        log_event("UPGRADE", f"puf response: {out.strip()[:80]}")
         self._upgrade_started = True
         return out
 
@@ -249,12 +257,14 @@ class FirmwareUpgrader:
             "Waiting for %s port %d to close (timeout=%ds) …",
             self.ip, check_port, self.PORT_DOWN_TIMEOUT,
         )
+        log_event("UPGRADE", f"waiting for device to go offline (port {check_port})")
         t0 = time.time()
         went_offline = False
         while time.time() - t0 < self.PORT_DOWN_TIMEOUT:
             if not self.is_port_open(check_port, timeout=3):
                 went_offline = True
                 logger.info("Device offline after %.1fs", time.time() - t0)
+                log_event("UPGRADE", f"device offline after {time.time() - t0:.1f}s")
                 break
             time.sleep(self.POLL_INTERVAL)
 
@@ -299,6 +309,7 @@ class FirmwareUpgrader:
             if self.is_port_open(check_port, timeout=3):
                 came_online = True
                 logger.info("Device online after %.1fs", time.time() - t0)
+                log_event("UPGRADE", f"device back online after {time.time() - t0:.1f}s")
                 break
             time.sleep(self.POLL_INTERVAL)
 
@@ -326,6 +337,7 @@ class FirmwareUpgrader:
                 version = self.get_version()
                 if version:
                     logger.info("Device responsive — version: %s", version)
+                    log_event("UPGRADE", f"post-upgrade version: {version.splitlines()[0][:80]}")
                     self.post_version = version
                     return version
             except Exception as exc:

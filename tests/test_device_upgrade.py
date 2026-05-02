@@ -23,6 +23,7 @@ import logging
 import pytest
 
 from lib.firmware_upgrader import FirmwareUpgrader
+from lib.test_trace import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -154,13 +155,16 @@ class TestDeviceUpgrade:
         size = os.path.getsize(fw)
         assert size > 0, f"Empty firmware file: {fw}"
         logger.info("Firmware: %s (%d bytes)", fw, size)
+        log_event("UPGRADE", f"firmware file: {os.path.basename(fw)} ({size} bytes)")
 
     # ── 02 ──
     def test_02_device_reachable(self, upgrader):
         """Device must be reachable via SSH before upgrade."""
+        log_event("UPGRADE", f"checking device reachable: {upgrader.ip}")
         assert upgrader.is_device_responsive(timeout=15), (
             f"Device {upgrader.ip} not reachable"
         )
+        log_event("UPGRADE", f"device {upgrader.ip} is reachable")
 
     # ── 03 ──
     def test_03_pre_upgrade_version(self, upgrader):
@@ -169,28 +173,35 @@ class TestDeviceUpgrade:
         assert ver, "Failed to read device version"
         TestDeviceUpgrade._pre_version = ver
         logger.info("Pre-upgrade version:\n%s", ver)
+        log_event("UPGRADE", f"pre-upgrade version: {ver.splitlines()[0][:80]}")
 
     # ── 04 ──
     def test_04_upload_firmware(self, upgrader):
         """Upload firmware file to device via SFTP."""
+        log_event("UPGRADE", f"SFTP upload start: {os.path.basename(upgrader.firmware_path)}")
         remote = upgrader.upload_firmware()
         TestDeviceUpgrade._upload_path = remote
         assert upgrader._upload_success, "Upload failed"
         logger.info("Uploaded to %s:%s", upgrader.ip, remote)
+        log_event("UPGRADE", f"SFTP upload complete → {remote}")
 
     # ── 05 ──
     def test_05_execute_upgrade(self, upgrader):
         """Execute upgrade command (imgupd / puf)."""
+        log_event("UPGRADE", f"executing upgrade: method={upgrader.method}")
         output = upgrader.execute_upgrade()
         TestDeviceUpgrade._upgrade_output = output
         assert upgrader._upgrade_started, "Upgrade command did not start"
         logger.info("Upgrade method=%s started", upgrader.method)
+        log_event("UPGRADE", f"upgrade command issued, awaiting reboot")
 
     # ── 06 ──
     def test_06_wait_for_reboot(self, upgrader):
         """Wait for device to reboot and return online."""
+        log_event("UPGRADE", f"waiting for reboot cycle on {upgrader.ip}")
         ok = upgrader.wait_for_reboot()
         assert ok, f"Device {upgrader.ip} did not come back after reboot"
+        log_event("UPGRADE", f"device back online after reboot")
 
     # ── 07 ──
     def test_07_verify_device_online(self, upgrader):
@@ -198,6 +209,7 @@ class TestDeviceUpgrade:
         ver = upgrader.verify_device_responsive(timeout=120)
         TestDeviceUpgrade._post_version = ver
         assert ver, "Device not responsive after upgrade"
+        log_event("UPGRADE", f"device responsive post-upgrade")
 
     # ── 08 ──
     def test_08_version_report(self, upgrader, upgrade_cfg):
@@ -217,6 +229,9 @@ class TestDeviceUpgrade:
             f"{'=' * 60}"
         )
         logger.info(report)
+        log_event("UPGRADE", f"pre:  {pre.splitlines()[0][:80]}")
+        log_event("UPGRADE", f"post: {post.splitlines()[0][:80]}")
+        log_event("UPGRADE", f"firmware: {fw}")
 
         # Post-upgrade version must be non-empty
         assert post and post != "N/A", "Post-upgrade version missing"
