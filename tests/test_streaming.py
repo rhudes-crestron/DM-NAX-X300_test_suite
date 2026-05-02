@@ -69,6 +69,7 @@ import time
 import logging
 
 from lib.generate_tones import tone_filename
+from lib.streaming_client import detect_mediaplayermode, MODE_MP1
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,9 @@ def _streaming_zones(device_cfg):
     streaming = device_cfg.get("streaming")
     if not streaming:
         pytest.skip("No streaming config in device profile")
-    return {int(k): v for k, v in streaming["zones"].items()}
+    zone_map = {int(k): v for k, v in streaming["zones"].items()}
+    selected = set(device_cfg.get("selected_zones", zone_map.keys()))
+    return {z: cfg for z, cfg in zone_map.items() if z in selected}
 
 
 def _audio_url(host_ip, port, freq_hz):
@@ -108,22 +111,48 @@ def _streaming_inputs_for_zone(zone_num):
     return f"M{zone_num}L", f"M{zone_num}R"
 
 
+def _resolve_stream_audio_source(device_cfg, zone_num, default_input, mode):
+    """Resolve per-zone AudioSource for current media-player mode.
+
+    StreamRoutings sheet for MP1 on 8-zone platforms uses Input09..Input16.
+    """
+    model = str(device_cfg.get("model", "")).upper()
+    if mode == MODE_MP1 and model in {"8ZSA", "4ZSP"}:
+        return f"Input{zone_num + 8:02d}"
+    return default_input
+
+
+def _apply_stream_routes(cresnext, device_cfg, zones, mode):
+    """Apply zone->AudioSource routing with MP1-specific StreamRoutings path."""
+    model = str(device_cfg.get("model", "")).upper()
+    if mode == MODE_MP1 and model in {"8ZSA", "4ZSP"}:
+        mapping = {}
+        for zone, zcfg in sorted(zones.items()):
+            mapping[zone] = _resolve_stream_audio_source(device_cfg, zone, zcfg["input"], mode)
+        cresnext.set_zone_sources_streamrouting(mapping)
+        for zone, src in sorted(mapping.items()):
+            logger.info("Routed Zone %d -> %s (MP1 StreamRoutings)", zone, src)
+        return
+
+    for zone, zcfg in sorted(zones.items()):
+        input_name = _resolve_stream_audio_source(device_cfg, zone, zcfg["input"], mode)
+        cresnext.set_zone_source(zone, input_name)
+        logger.info("Routed Zone %d -> %s", zone, input_name)
+
+
 class TestStreamingRouting:
     """Phase 1: Establish stream routing — zone → streaming input."""
 
-    def test_route_zones_to_streaming(self, cresnext, device_cfg):
+    def test_route_zones_to_streaming(self, cresnext, device_cfg, ssh):
         """Route each zone to its streaming input via AvMatrixRouting."""
         zones = _streaming_zones(device_cfg)
-
-        for zone, zcfg in sorted(zones.items()):
-            input_name = zcfg["input"]
-            cresnext.set_zone_source(zone, input_name)
-            logger.info("Routed Zone %d → %s", zone, input_name)
+        mode = detect_mediaplayermode(ssh)
+        _apply_stream_routes(cresnext, device_cfg, zones, mode)
 
     def test_volumes_at_0db(self, cresnext, device_cfg):
         """Set all zone volumes to 0 dB (800) — baseline for level checks."""
-        num_zones = device_cfg["zones"]
-        for zone in range(1, num_zones + 1):
+        zones = device_cfg.get("selected_zones", list(range(1, device_cfg.get("zones", 4) + 1)))
+        for zone in zones:
             cresnext.set_zone_audio(zone, Volume=800, IsMuted=False)
             logger.info("Zone %d volume set to 800 (0 dB)", zone)
 
@@ -213,7 +242,11 @@ class TestStreamingLevels:
         left, right = _streaming_inputs_for_zone(zone_num)
 
         # Ensure route and volume are set
-        cresnext.set_zone_source(zone_num, zcfg["input"])
+        input_name = _resolve_stream_audio_source(device_cfg, zone_num, zcfg["input"], streaming.mode)
+        if streaming.mode == MODE_MP1 and str(device_cfg.get("model", "")).upper() in {"8ZSA", "4ZSP"}:
+            cresnext.set_zone_sources_streamrouting({zone_num: input_name})
+        else:
+            cresnext.set_zone_source(zone_num, input_name)
         cresnext.set_zone_audio(zone_num, Volume=800, IsMuted=False)
 
         # Ensure player is playing
@@ -348,9 +381,8 @@ class TestStreamingCleanup:
 
     def test_silence_after_stop(self, dsp, device_cfg):
         """All streaming mux inputs must be silent after streaming stops."""
-        num_zones = device_cfg["zones"]
-
-        for z in range(1, num_zones + 1):
+        zones = device_cfg.get("selected_zones", list(range(1, device_cfg.get("zones", 4) + 1)))
+        for z in zones:
             left, right = _streaming_inputs_for_zone(z)
             level_l = dsp.measure_input_level(left, settle_time=1.0)
             assert level_l < SILENCE_FLOOR_DB, (
@@ -394,8 +426,8 @@ class TestStreamingCleanup:
 
     def test_clear_routes(self, cresnext, device_cfg):
         """Remove all zone audio source routes (cleanup)."""
-        num_zones = device_cfg["zones"]
-        for z in range(1, num_zones + 1):
+        zones = device_cfg.get("selected_zones", list(range(1, device_cfg.get("zones", 4) + 1)))
+        for z in zones:
             try:
                 cresnext.set_zone_source(z, "")
             except Exception:

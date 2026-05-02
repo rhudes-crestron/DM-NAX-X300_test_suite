@@ -17,6 +17,8 @@ RESULTS_BASE="results"
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 RESULTS_DIR="${RESULTS_BASE}/${TIMESTAMP}"
 SKIP_UPGRADE="${SKIP_UPGRADE:-false}"
+ZONE_MODE="${ZONE_MODE:-full}"
+ZONE_LIST="${ZONE_LIST:-}"
 
 # Optional overrides (env vars or positional args)
 DEVICE_IP="${DEVICE_IP:-${2:-}}"
@@ -30,6 +32,8 @@ EXTRA_ARGS=""
 [ -n "${DEVICE_USER}" ]    && EXTRA_ARGS="${EXTRA_ARGS} --username=${DEVICE_USER}"
 [ -n "${DEVICE_PASS}" ]    && EXTRA_ARGS="${EXTRA_ARGS} --password=${DEVICE_PASS}"
 [ -n "${FIRMWARE_FILE}" ]  && EXTRA_ARGS="${EXTRA_ARGS} --firmware-file=${FIRMWARE_FILE}"
+EXTRA_ARGS="${EXTRA_ARGS} --zone-mode=${ZONE_MODE}"
+[ -n "${ZONE_LIST}" ]      && EXTRA_ARGS="${EXTRA_ARGS} --zones=${ZONE_LIST}"
 
 # Resolve effective IP for device_info (CLI override or from YAML)
 EFFECTIVE_IP="${DEVICE_IP}"
@@ -41,6 +45,7 @@ echo "════════════════════════�
 echo "  DM-NAX Nightly Test Suite"
 echo "  Device:  ${DEVICE}"
 [ -n "${DEVICE_IP}" ] && echo "  IP:      ${DEVICE_IP} (override)"
+echo "  Zones:   mode=${ZONE_MODE}${ZONE_LIST:+ override=${ZONE_LIST}}"
 echo "  Time:    ${TIMESTAMP}"
 echo "  Results: ${RESULTS_DIR}"
 echo "═══════════════════════════════════════════════════════════"
@@ -159,9 +164,10 @@ if os.path.isfile(upgrade_path):
             + upgrade.get('summary', {}).get(key, 0)
         )
     merged['summary']['total'] = len(merged['tests'])
-    merged['summary']['duration'] = (
-        merged.get('summary', {}).get('duration', 0)
-        + upgrade.get('summary', {}).get('duration', 0)
+    # Carry duration from root level (pytest-json-report stores it there)
+    merged['duration'] = (
+        merged.get('duration', 0)
+        + upgrade.get('duration', 0)
     )
     print('[*] Merged upgrade + DSP results')
 else:

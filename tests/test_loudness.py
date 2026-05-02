@@ -31,15 +31,19 @@ class TestLoudness:
         dsp.start_tone(sig_ch, 100, -20)
         dsp.route_sig_to_output(0)
 
-        # Set moderate volume
+        # Set moderate volume where loudness compensation is active
         dsp.set_zone_volume(1, 400)  # ~40%
 
+        dsp.set_zone_loudness(1, False)
         level_off = dsp.measure_output_level("A1L")
 
         dsp.set_zone_loudness(1, True)
         level_on = dsp.measure_output_level("A1L")
 
+        tol = float(test_settings["level_tolerance_db"])
         if level_off > test_settings["mute_floor_db"]:
-            assert level_on >= level_off - test_settings["level_tolerance_db"], (
-                f"Loudness did not boost: off={level_off:.2f}, on={level_on:.2f}"
+            # Loudness compensation must *increase* the low-freq level
+            assert level_on >= level_off + tol, (
+                f"Loudness had no boost effect at 100Hz: "
+                f"off={level_off:.2f}dB, on={level_on:.2f}dB (need +{tol}dB)"
             )

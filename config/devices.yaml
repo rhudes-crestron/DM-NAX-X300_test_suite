@@ -20,6 +20,10 @@ devices:
     dsp_fw_version: 21
     has_speaker_protect: false
     ssh_port: 22
+    # Input01 (T1/TOSLINK) is physically silent without a cable connected.
+    # Setting zones to Input01 gives CresNext a valid source assignment while
+    # keeping the internal tone generator (ch28) as the sole audio source.
+    dsp_tone_input: "Input01"
     streaming:
       base_port: 60001
       # Zone → streaming input → player port → test tone frequency
@@ -45,11 +49,31 @@ devices:
       T1: { channels: ["T1L","T1R"], index: [2,3], type: "stream" }
       L1: { channels: ["L1L","L1R"], index: [4,5], type: "line", has_adc: true }
       L2: { channels: ["L2L","L2R"], index: [6,7], type: "line", has_adc: true }
-    signal_generator: { channel: 28, name: "SIG" }
+    # fw42 on 8ZSA exposes tone control on physical channels (0-7).
+    # Use ch0 (S1L/Input01) for DSP tone tests.
+    signal_generator: { channel: 0, name: "S1L" }
     mixer_outputs: 8
     dsp_fw_version: 42
     has_speaker_protect: true
     ssh_port: 22
+    # AvMatrixRouting input that carries the internal DSP bus (tone gen / mixer).
+    # DSP tone-generator tests route zones here so signal reaches amp outputs.
+    # Input01 (S1/SPDIF) is physically silent when no cable is connected,
+    # letting the internal signal generator be the sole audio source.
+    dsp_tone_input: "Input01"
+    engineering_debug:
+      auto_enable_for_streaming: true
+      # Zip source on Linux build server is resolved from mounted path:
+      # /mnt/nightly/AM335x_dinap3/eng_dbg
+      # (UNC fallback is used only if mount is unavailable.)
+      zip_file: ""
+      search_roots: []
+      # Optional SMB credentials for the UNC share (if anonymous access is denied).
+      smb_username: "builduser"
+      smb_password: "password"
+      smb_domain: ""
+      set_current_datetime: false
+      remote_zip_path: "firmware/engineering_debug.zip"
     streaming:
       base_port: 60001
       # Input05-12 = MediaStream1-8 on 8ZSA (ports 60001-60008)
@@ -88,6 +112,9 @@ devices:
     dsp_fw_version: 42
     has_speaker_protect: true
     ssh_port: 22
+    # AvMatrixRouting input for tone-gen tests.  On 4ZSP the signal generator
+    # IS Input01 (T1L, ch0) — routing zones here lets the tone flow through.
+    dsp_tone_input: "Input01"
     streaming:
       base_port: 60001
       # Input05-12 = MediaStream1-8 on 4ZSP (ports 60001-60008), same as 8ZSA
@@ -101,6 +128,15 @@ devices:
         7: { input: "Input11", port: 60007, tone_hz: 6000 }
         8: { input: "Input12", port: 60008, tone_hz: 12000 }
       audio_server_port: 8088
+
+# Zone selection profiles for runtime filtering.
+# full mode = all zones on the device.
+# quick mode = representative subset for faster regression runs.
+zone_profiles:
+  quick:
+    DM-NAX-8ZSA: [2, 4, 5, 8]
+    DM-NAX-4ZSP: [2, 4, 5, 8]
+    DM-NAX-4ZSA: [1, 3]
 
 # Firmware upgrade settings
 firmware:

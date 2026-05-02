@@ -89,6 +89,40 @@ def purge_old_results(retention_days):
         logger.info("Purged %d old result directories (>%d days)", removed, retention_days)
 
 
+def wait_for_cresnext_ready(device_cfg, timeout_s=300, retry_delay_s=10):
+    """Wait until CresNext web login is reachable and accepts authentication.
+
+    This is primarily needed right after firmware upgrade, where SSH may be up
+    before the CresNext web service is fully initialized.
+    """
+    from lib.cresnext_client import CresNextClient
+
+    ip = device_cfg["ip"]
+    username = device_cfg["username"]
+    password = device_cfg["password"]
+
+    retries = max(1, int(timeout_s // retry_delay_s))
+    client = CresNextClient(ip=ip, username=username, password=password)
+    try:
+        logger.info(
+            "Waiting for CresNext on %s (timeout=%ss, interval=%ss)",
+            ip,
+            timeout_s,
+            retry_delay_s,
+        )
+        client.connect(retries=retries, retry_delay=retry_delay_s)
+        logger.info("CresNext ready on %s", ip)
+        return True
+    except Exception as e:
+        logger.error("CresNext not ready on %s after %ds: %s", ip, timeout_s, e)
+        return False
+    finally:
+        try:
+            client.disconnect()
+        except Exception:
+            pass
+
+
 def run_device_tests(target_name, target_cfg, devices_cfg, timestamp, skip_upgrade):
     """Run tests for a single device target.  Executed in a child process."""
     device_name = target_cfg["device"]
@@ -164,6 +198,30 @@ def run_device_tests(target_name, target_cfg, devices_cfg, timestamp, skip_upgra
 
     # Phase 2: DSP tests
     if dsp_tests:
+        # After firmware upgrade, wait until CresNext is fully ready before
+        # launching DSP tests to avoid fixture setup failures.
+        if firmware_tests and not skip_upgrade:
+            wait_timeout_s = target_cfg.get("post_upgrade_cresnext_timeout_s", 600)
+            wait_retry_s = target_cfg.get("post_upgrade_cresnext_retry_s", 10)
+            if not wait_for_cresnext_ready(
+                device,
+                timeout_s=wait_timeout_s,
+                retry_delay_s=wait_retry_s,
+            ):
+                return {
+                    "target": target_name,
+                    "device": device_name,
+                    "upgrade_exit": results.get("upgrade_exit", -1),
+                    "test_exit": 1,
+                    "status": "error",
+                    "message": (
+                        "CresNext web service not ready after firmware upgrade "
+                        f"(timeout={wait_timeout_s}s)"
+                    ),
+                    "results_dir": str(run_dir),
+                    "report_html": str(run_dir / "report.html"),
+                }
+
         logger.info("[%s] Phase 2: DSP tests (%d files)", target_name, len(dsp_tests))
         dsp_cmd = base_args + [
             f"--json-report-file={run_dir / 'results.json'}",

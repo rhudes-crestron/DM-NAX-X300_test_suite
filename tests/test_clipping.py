@@ -68,6 +68,7 @@ class TestClipping:
     def test_no_clipping_at(self, dsp, device_cfg, test_settings, drive_db):
         """No unexpected AGC gain reduction at {drive_db} dB drive level."""
         sig_ch = device_cfg["signal_generator"]["channel"]
+        zone = dsp.zone_for_output(OUTPUT_IDX)
 
         # Set up signal path
         dsp.route_sig_to_output(OUTPUT_IDX, gain_db=0)
@@ -77,7 +78,8 @@ class TestClipping:
         level = dsp.measure_output_level(OUTPUT_NAME)
 
         # Verify signal presence
-        dsp.assert_signal_presence(1, expected=True)
+        dsp.assert_signal_presence(zone, expected=True)
+        dsp.assert_signal_not_clipping(zone)
 
         # Read AGC state
         agc_raw = dsp.get_agc(0)
@@ -105,11 +107,23 @@ class TestClipping:
     def test_output_tracks_input(self, dsp, device_cfg, test_settings, drive_db):
         """Output level at {drive_db} dB must track input within ±1.5 dB."""
         sig_ch = device_cfg["signal_generator"]["channel"]
+        zone = dsp.zone_for_output(OUTPUT_IDX)
 
         dsp.route_sig_to_output(OUTPUT_IDX, gain_db=0)
-        dsp.start_tone(sig_ch, TONE_FREQ, drive_db)
 
+        # Measure a per-test reference point first, then the target drive.
+        # This validates real level-tracking (Δoutput ~= Δdrive), which
+        # catches clipping/limiting plateaus better than a floor-only check.
+        ref_drive_db = -20
+        dsp.start_tone(sig_ch, TONE_FREQ, ref_drive_db)
+        ref_level = dsp.measure_output_level(OUTPUT_NAME)
+
+        dsp.start_tone(sig_ch, TONE_FREQ, drive_db)
         level = dsp.measure_output_level(OUTPUT_NAME)
+
+        # Verify signal presence (audio path alive) before cleanup
+        dsp.assert_signal_presence(zone, expected=True)
+        dsp.assert_signal_not_clipping(zone)
 
         # Cleanup
         dsp.stop_tone(sig_ch)
@@ -117,15 +131,24 @@ class TestClipping:
 
         if math.isinf(level):
             pytest.skip(f"No signal measured at {drive_db} dB")
+        if math.isinf(ref_level):
+            pytest.skip("No signal measured at reference drive -20 dB")
 
-        # The output should be close to the mixer post level
-        # With 0 dB mixer gain, output ≈ drive_db + processing headroom
-        # We check relative to a known reference at -20 dB
-        # For absolute tracking, the output level should follow drive changes
-        logger.info("Drive %+3d dB → output %.2f dB", drive_db, level)
+        expected_delta = drive_db - ref_drive_db
+        actual_delta = level - ref_level
+        err = abs(actual_delta - expected_delta)
 
-        # At 0 dB mixer gain, output should be within tolerance of drive level
-        # (accounting for the DSP processing chain ~-49 dB offset from AGC)
+        logger.info(
+            "Drive %+3d dB (ref %+3d): output=%.2f dB, ref=%.2f dB, "
+            "Δout=%+.2f dB, Δin=%+.2f dB, err=%.2f dB",
+            drive_db, ref_drive_db, level, ref_level, actual_delta, expected_delta, err,
+        )
+
         assert level > test_settings["mute_floor_db"], (
             f"No output at drive {drive_db} dB: level={level:.2f} dB"
+        )
+        assert err <= TRACKING_TOLERANCE_DB, (
+            f"Output does not track input at drive {drive_db} dB: "
+            f"Δout={actual_delta:+.2f} dB vs Δin={expected_delta:+.2f} dB "
+            f"(err={err:.2f}, tol={TRACKING_TOLERANCE_DB})"
         )

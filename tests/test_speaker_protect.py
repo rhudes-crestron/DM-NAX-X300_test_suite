@@ -19,80 +19,106 @@ import pytest
 import time
 
 
+# All possible zones; conftest.pytest_collection_modifyitems filters to the
+# session's --zone-mode / --zones selection at collection time.
+ALL_ZONES = list(range(1, 9))
+
+
 class TestSpeakerProtect:
     """Verify speaker protection configuration via CresNext REST API."""
 
     CATEGORY = "dsp_speaker_protect"
 
-    def test_speaker_protect_supported(self, dsp, device_cfg, test_settings):
+    @staticmethod
+    def _output_info(zone):
+        return (zone - 1) * 2, f"A{zone}L"
+
+    @staticmethod
+    def _require_zone(device_cfg, zone):
+        if zone > device_cfg.get("zones", 4):
+            pytest.skip(f"Zone {zone} not available")
+        out_name = f"A{zone}L"
+        if out_name not in device_cfg.get("amp_outputs", []):
+            pytest.skip(f"{out_name} not available on {device_cfg['model']}")
+
+    @pytest.mark.parametrize("zone", ALL_ZONES)
+    def test_speaker_protect_supported(self, dsp, device_cfg, test_settings, zone):
         """Device reports speaker protection as supported."""
-        sp = dsp.cn.get_speaker_protect(1)
+        self._require_zone(device_cfg, zone)
+        sp = dsp.cn.get_speaker_protect(zone)
         assert sp.get("IsSpeakerProtectSupported") is True, (
-            f"Speaker protect not supported: {sp}"
+            f"Zone {zone} speaker protect not supported: {sp}"
         )
 
-    def test_speaker_protect_enable(self, dsp, device_cfg, test_settings):
+    @pytest.mark.parametrize("zone", ALL_ZONES)
+    def test_speaker_protect_enable(self, dsp, device_cfg, test_settings, zone):
         """Speaker protection can be enabled."""
+        self._require_zone(device_cfg, zone)
         cn = dsp.cn
-        cn.set_speaker_protect(1, IsSpeakerProtectEnabled=True)
+        cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=True)
         time.sleep(0.3)
-        sp = cn.get_speaker_protect(1)
+        sp = cn.get_speaker_protect(zone)
         assert sp.get("IsSpeakerProtectEnabled") is True, (
-            f"Speaker protect enable not reflected: {sp.get('IsSpeakerProtectEnabled')}"
+            f"Zone {zone} speaker protect enable not reflected: {sp.get('IsSpeakerProtectEnabled')}"
         )
         # Restore
-        cn.set_speaker_protect(1, IsSpeakerProtectEnabled=False)
+        cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=False)
 
-    def test_speaker_protect_disable(self, dsp, device_cfg, test_settings):
+    @pytest.mark.parametrize("zone", ALL_ZONES)
+    def test_speaker_protect_disable(self, dsp, device_cfg, test_settings, zone):
         """Speaker protection can be disabled."""
+        self._require_zone(device_cfg, zone)
         cn = dsp.cn
         # Enable first, then disable
-        cn.set_speaker_protect(1, IsSpeakerProtectEnabled=True)
+        cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=True)
         time.sleep(0.2)
-        cn.set_speaker_protect(1, IsSpeakerProtectEnabled=False)
+        cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=False)
         time.sleep(0.3)
-        sp = cn.get_speaker_protect(1)
+        sp = cn.get_speaker_protect(zone)
         assert sp.get("IsSpeakerProtectEnabled") is False, (
-            f"Speaker protect disable not reflected: {sp.get('IsSpeakerProtectEnabled')}"
+            f"Zone {zone} speaker protect disable not reflected: {sp.get('IsSpeakerProtectEnabled')}"
         )
 
+    @pytest.mark.parametrize("zone", ALL_ZONES)
     @pytest.mark.parametrize("power", [10, 20, 40])
-    def test_speaker_power_setting(self, dsp, device_cfg, test_settings, power):
+    def test_speaker_power_setting(self, dsp, device_cfg, test_settings, zone, power):
         """Speaker power rating is accepted and reflected in readback."""
+        self._require_zone(device_cfg, zone)
         cn = dsp.cn
         # Skip power values above device PowerMax
-        sp = cn.get_speaker_protect(1)
+        sp = cn.get_speaker_protect(zone)
         power_max = sp.get("PowerMax", 50)
         if power > power_max:
             pytest.skip(f"Power {power}W exceeds device max {power_max}W")
 
-        cn.set_speaker_protect(1, IsSpeakerProtectEnabled=True, Power=power)
+        cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=True, Power=power)
         time.sleep(0.3)
-        sp = cn.get_speaker_protect(1)
+        sp = cn.get_speaker_protect(zone)
         assert sp.get("Power") == power, (
-            f"Speaker power not reflected: expected {power}, got {sp.get('Power')}"
+            f"Zone {zone} speaker power not reflected: expected {power}, got {sp.get('Power')}"
         )
         # Restore
-        cn.set_speaker_protect(1, IsSpeakerProtectEnabled=False, Power=40)
+        cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=False, Power=40)
 
+    @pytest.mark.parametrize("zone", ALL_ZONES)
     @pytest.mark.parametrize("impedance", ["4ohm", "8ohm"])
-    def test_speaker_impedance_setting(self, dsp, device_cfg, test_settings, impedance):
+    def test_speaker_impedance_setting(self, dsp, device_cfg, test_settings, zone, impedance):
         """Speaker impedance is accepted and reflected in readback."""
+        self._require_zone(device_cfg, zone)
         cn = dsp.cn
-        cn.set_speaker_protect(1, IsSpeakerProtectEnabled=True, Impedance=impedance)
+        cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=True, Impedance=impedance)
         time.sleep(0.3)
-        sp = cn.get_speaker_protect(1)
+        sp = cn.get_speaker_protect(zone)
         assert sp.get("Impedance") == impedance, (
-            f"Impedance not reflected: expected {impedance}, got {sp.get('Impedance')}"
+            f"Zone {zone} impedance not reflected: expected {impedance}, got {sp.get('Impedance')}"
         )
         # Restore
-        cn.set_speaker_protect(1, IsSpeakerProtectEnabled=False, Impedance="8ohm")
+        cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=False, Impedance="8ohm")
 
-    @pytest.mark.parametrize("zone", [1, 2, 3, 4])
+    @pytest.mark.parametrize("zone", ALL_ZONES)
     def test_speaker_protect_per_zone(self, dsp, device_cfg, test_settings, zone):
         """Speaker protection works on each zone independently."""
-        if zone > device_cfg.get("zones", 4):
-            pytest.skip(f"Zone {zone} not available")
+        self._require_zone(device_cfg, zone)
 
         cn = dsp.cn
         cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=True, Power=20)
@@ -103,57 +129,79 @@ class TestSpeakerProtect:
         # Restore
         cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=False, Power=40)
 
-    def test_speaker_protect_does_not_kill_signal(self, dsp, device_cfg, test_settings):
+    @pytest.mark.parametrize("zone", ALL_ZONES)
+    def test_speaker_protect_does_not_kill_signal(self, dsp, device_cfg, test_settings, zone):
         """Enabling speaker protection doesn't silence normal-level output."""
+        self._require_zone(device_cfg, zone)
+        out_idx, out_name = self._output_info(zone)
+
         dsp.start_sig_tone()
-        dsp.route_sig_to_output(0)
+        dsp.route_sig_to_output(out_idx)
         time.sleep(test_settings["signal_settle_time_s"])
 
         cn = dsp.cn
-        cn.set_speaker_protect(1, IsSpeakerProtectEnabled=True, Power=40)
+        cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=True, Power=40)
         time.sleep(0.5)
 
-        level = dsp.measure_output_level("A1L")
+        level = dsp.measure_output_level(out_name)
         assert level > test_settings["mute_floor_db"], (
-            f"Speaker protect killed signal: {level:.2f} dB"
+            f"Zone {zone} speaker protect killed signal at {out_name}: {level:.2f} dB"
         )
-        dsp.assert_signal_presence(1, expected=True)
+        dsp.assert_signal_presence(zone, expected=True)
 
         # Restore
-        cn.set_speaker_protect(1, IsSpeakerProtectEnabled=False)
+        cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=False)
 
-    def test_speaker_protect_limits_output(self, dsp, device_cfg, test_settings):
+    @pytest.mark.parametrize("zone", ALL_ZONES)
+    def test_speaker_protect_limits_output(self, dsp, device_cfg, test_settings, zone):
         """Speaker protection at min power limits output vs. unprotected.
 
         Drive the signal generator at a strong level and compare output_db
         with speaker protect OFF versus ON at the lowest power setting.
         The limiter should reduce (or at minimum not increase) the output.
         """
+        self._require_zone(device_cfg, zone)
         cn = dsp.cn
+        out_idx, out_name = self._output_info(zone)
 
         # Drive a loud tone
         dsp.start_sig_tone(gain_db=-6)
-        dsp.route_sig_to_output(0)
-        dsp.set_zone_volume(1, 1000)  # Max volume
+        dsp.route_sig_to_output(out_idx)
+        dsp.set_zone_volume(zone, 1000)  # Max volume
         time.sleep(test_settings["signal_settle_time_s"])
 
         # Measure without protection
-        cn.set_speaker_protect(1, IsSpeakerProtectEnabled=False)
+        cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=False)
         time.sleep(0.5)
-        level_off = dsp.measure_output_level("A1L", settle_time=0.5)
+        level_off = dsp.measure_output_level(out_name, settle_time=0.5)
 
         # Enable protection at lowest power rating
-        cn.set_speaker_protect(1, IsSpeakerProtectEnabled=True, Power=10, Impedance="4ohm")
+        cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=True, Power=10, Impedance="4ohm")
         time.sleep(0.5)
-        level_on = dsp.measure_output_level("A1L", settle_time=0.5)
+        level_on = dsp.measure_output_level(out_name, settle_time=0.5)
+        sp_on = cn.get_speaker_protect(zone)
+        assert sp_on.get("IsSpeakerProtectEnabled") is True, f"Zone {zone}: protect not enabled"
+        assert sp_on.get("Power") == 10, f"Zone {zone}: protect power not latched: {sp_on}"
+        assert sp_on.get("Impedance") == "4ohm", f"Zone {zone}: protect impedance not latched: {sp_on}"
 
-        # The limiter should reduce or cap the output level
-        assert level_on <= level_off + 1.0, (
-            f"Speaker protect did not limit: OFF={level_off:.1f} dB, "
-            f"ON(10W/4ohm)={level_on:.1f} dB"
+        # The limiter at min power (10W/4ohm) must actually reduce the level
+        tol = float(test_settings["level_tolerance_db"])
+        assert level_on <= level_off - tol, (
+            f"Zone {zone}: speaker protect did not limit {out_name}: "
+            f"OFF={level_off:.1f}dB, ON(10W/4ohm)={level_on:.1f}dB "
+            f"(expected >={tol}dB reduction)"
+        )
+
+        # Disable and verify level recovers toward OFF reference.
+        cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=False, Power=40, Impedance="8ohm")
+        time.sleep(0.5)
+        level_restored = dsp.measure_output_level(out_name, settle_time=0.5)
+        assert level_restored >= level_on + tol, (
+            f"Zone {zone}: output did not recover after disabling protect: "
+            f"ON={level_on:.1f}dB, restored={level_restored:.1f}dB"
         )
 
         # Restore
-        cn.set_speaker_protect(1, IsSpeakerProtectEnabled=False, Power=40, Impedance="8ohm")
-        dsp.set_zone_volume(1, 800)
+        cn.set_speaker_protect(zone, IsSpeakerProtectEnabled=False, Power=40, Impedance="8ohm")
+        dsp.set_zone_volume(zone, 800)
         dsp.stop_sig_tone()

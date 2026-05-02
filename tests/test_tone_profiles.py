@@ -13,6 +13,17 @@ class TestToneProfiles:
 
     CATEGORY = "dsp_tone_profiles"
 
+    @staticmethod
+    def _set_profile_and_assert_readback(dsp, profile_name):
+        dsp.set_zone_tone_profile(1, profile_name)
+        if dsp.cn is None:
+            return
+        zone_audio = dsp.get_zone_audio(1)
+        actual = zone_audio.get("ToneProfile")
+        assert actual == profile_name, (
+            f"ToneProfile readback mismatch: expected={profile_name}, actual={actual}"
+        )
+
     @pytest.mark.parametrize("profile_name", [
         "Off", "Classical", "Jazz", "Pop", "Rock", "SpokenWord",
     ])
@@ -22,7 +33,7 @@ class TestToneProfiles:
         dsp.start_sig_tone()
         dsp.route_sig_to_output(0)
 
-        dsp.set_zone_tone_profile(1, profile_name)
+        self._set_profile_and_assert_readback(dsp, profile_name)
         level = dsp.measure_output_level("A1L")
 
         assert level > test_settings["mute_floor_db"], (
@@ -31,16 +42,48 @@ class TestToneProfiles:
         dsp.assert_signal_presence(1, expected=True)
 
     def test_profile_changes_eq(self, dsp, device_cfg, test_settings):
-        """Switching from Off to a profile changes the output level (EQ is applied)."""
+        """Each non-Off profile must measurably alter output at one or more frequencies."""
         sig_ch = device_cfg["signal_generator"]["channel"]
-        # Use 200Hz to make EQ differences measurable
-        dsp.start_tone(sig_ch, 200, -20)
-        dsp.route_sig_to_output(0)
+        output_name = "A1L"
+        output_idx = 0
+        tone_gain = -20
+        freqs_hz = [200, 1000, 8000]
+        tol = float(test_settings["level_tolerance_db"])
+        non_off_profiles = ["Classical", "Jazz", "Pop", "Rock", "SpokenWord"]
 
-        level_off = dsp.measure_output_level("A1L")
+        try:
+            dsp.route_sig_to_output(output_idx)
 
-        dsp.set_zone_tone_profile(1, "Rock")
-        level_rock = dsp.measure_output_level("A1L")
+            off_levels = {}
+            for freq in freqs_hz:
+                dsp.start_tone(sig_ch, freq, tone_gain)
+                self._set_profile_and_assert_readback(dsp, "Off")
+                off_levels[freq] = dsp.measure_output_level(output_name)
+                dsp.stop_tone(sig_ch)
 
-        assert level_off > test_settings["mute_floor_db"], "No signal with profile Off"
-        assert level_rock > test_settings["mute_floor_db"], "No signal with Rock profile"
+            for profile in non_off_profiles:
+                deltas = []
+                for freq in freqs_hz:
+                    dsp.start_tone(sig_ch, freq, tone_gain)
+                    self._set_profile_and_assert_readback(dsp, profile)
+                    profile_level = dsp.measure_output_level(output_name)
+                    off_level = off_levels[freq]
+
+                    assert off_level > test_settings["mute_floor_db"], (
+                        f"No signal with Off profile at {freq}Hz: {off_level:.2f}dB"
+                    )
+                    assert profile_level > test_settings["mute_floor_db"], (
+                        f"No signal with {profile} profile at {freq}Hz: {profile_level:.2f}dB"
+                    )
+
+                    deltas.append(abs(profile_level - off_level))
+                    dsp.stop_tone(sig_ch)
+
+                assert max(deltas) >= tol, (
+                    f"{profile} had no measurable EQ effect across {freqs_hz}: "
+                    f"max |delta|={max(deltas):.2f}dB (need >= {tol:.2f}dB)"
+                )
+        finally:
+            self._set_profile_and_assert_readback(dsp, "Off")
+            dsp.stop_tone(sig_ch)
+            dsp.clear_sig_route(output_idx)

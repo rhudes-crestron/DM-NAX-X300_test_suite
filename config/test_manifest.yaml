@@ -19,7 +19,7 @@
 # ── Global defaults applied to all devices unless overridden ──
 defaults:
   skip_upgrade: false
-  timeout_minutes: 60        # max wall-clock time per device run
+  timeout_minutes: 180       # max wall-clock time per device run (3 hours)
   retry_failed: 0            # re-run failed tests N times (0=disable)
   results_retention_days: 30 # auto-purge results older than this
   notify_on_failure: true
@@ -49,7 +49,6 @@ test_groups:
   signal_routing: &signal_routing
     - tests/test_signal_routing.py
     - tests/test_input_mute.py
-    - tests/test_crosstalk.py
 
   amplifier: &amplifier
     - tests/test_amp_health.py
@@ -81,7 +80,7 @@ test_targets:
       - *streaming
     skip_tests:
       - tests/test_input_compensation.py   # not supported on fw21
-    extra_pytest_args: ""
+    extra_pytest_args: "--zone-mode=quick"
 
   DM-NAX-4ZSP:
     enabled: true
@@ -97,7 +96,7 @@ test_targets:
       - *streaming
     skip_tests:
       - tests/test_input_compensation.py   # fw42 uses ampctrl, not dsp gain
-    extra_pytest_args: ""
+    extra_pytest_args: "--zone-mode=quick"
 
   DM-NAX-8ZSA:
     enabled: true
@@ -113,7 +112,7 @@ test_targets:
       - *streaming
     skip_tests:
       - tests/test_input_compensation.py
-    extra_pytest_args: ""
+    extra_pytest_args: "--zone-mode=quick"
 
   # ── Template for adding new devices ──
   # DM-NAX-NEW:

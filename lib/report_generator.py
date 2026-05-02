@@ -6,6 +6,7 @@ categorized results, and interactive charts.
 import os
 import json
 import logging
+import re
 from datetime import datetime
 from jinja2 import Environment, FileSystemLoader
 
@@ -142,9 +143,10 @@ def _get_category_paths(model="4ZSA"):
         ],
         "Input Compensation": [
             ("SSH: dsp tone on ch", "input"),
-            ("SSH: dsp gain ch set dB", "highlight"),
-            ("SSH: dsp \u2192 gain_db", "measure"),
-            ("Assert gain_db \u2248 set", "verify"),
+            ("REST: SourceAudio Compensation", "highlight"),
+            ("REST GET SourceAudio", "measure"),
+            ("SSH: dsp \u2192 gain_db + ducker_db", "measure"),
+            ("Assert readback + output \u0394", "verify"),
         ],
         "Loudness": [
             ("SSH: dsp tone 100Hz", "input"),
@@ -157,8 +159,9 @@ def _get_category_paths(model="4ZSA"):
         "Tone Profiles": [
             ("SSH: dsp tone + mix", "input"),
             ("REST: ToneProfile=name", "highlight"),
-            ("SSH: dsp \u2192 output_db", "measure"),
-            ("Assert signal present", "verify"),
+            ("REST GET ZoneAudio", "measure"),
+            ("SSH: dsp \u2192 output_db @ 200/1k/8k", "measure"),
+            ("Assert profile \u2260 Off (\u0394)", "verify"),
         ],
         "Night Mode": [
             ("SSH: dsp tone @ -6dB", "input"),
@@ -207,6 +210,94 @@ def _get_category_paths(model="4ZSA"):
     }
 
 
+def _load_trace_logs(results_dir):
+    """Load per-test trace logs from the test_logs/ subdirectory.
+
+    Returns a dict mapping nodeid fragments to trace-log content strings.
+    File names follow the convention produced by lib/test_trace.py:
+      tests_test_signal_routing.py_TestSignalRouting_test_device_reachable.log
+    We build a lookup key from the nodeid by replacing '/' and '::' with '_'.
+    """
+    trace_dir = os.path.join(results_dir, "test_logs")
+    logs = {}
+    if not os.path.isdir(trace_dir):
+        return logs
+
+    for fname in os.listdir(trace_dir):
+        if not fname.endswith(".log"):
+            continue
+        key = fname[:-4]  # strip .log
+        path = os.path.join(trace_dir, fname)
+        try:
+            with open(path, errors="replace") as f:
+                logs[key] = f.read()
+        except OSError:
+            pass
+    return logs
+
+
+def _nodeid_to_trace_key(nodeid):
+    """Convert a pytest nodeid to the trace-log filename stem.
+
+    Must mirror lib/test_trace._sanitize_nodeid exactly:
+      re.sub(r"[^A-Za-z0-9_.-]+", "_", nodeid).strip("_")[:220]
+
+    Example: tests/test_bass_treble.py::TestBassTreble::test_bass_changes_level[120-boost +12dB-1]
+           → tests_test_bass_treble.py_TestBassTreble_test_bass_changes_level_120-boost_12dB-1
+    """
+    key = re.sub(r"[^A-Za-z0-9_.-]+", "_", nodeid)
+    return key.strip("_")[:220] or "unknown_test"
+
+
+_TRACE_RE = re.compile(r"^\[(?P<ts>[^\]]+)\]\s+\[(?P<src>[^\]]+)\]\s+(?P<msg>.*)$")
+
+
+def _trace_kind(message):
+    """Classify a trace line as Request/Response/Event."""
+    msg = (message or "").strip()
+    upper = msg.upper()
+    if upper.startswith("RESP ") or upper.startswith("STDERR="):
+        return "Response"
+    if msg.startswith("GET ") or msg.startswith("POST "):
+        return "Request"
+    if "CMD=" in upper or upper.startswith("EXEC "):
+        return "Request"
+    return "Event"
+
+
+def _parse_trace_steps(trace_text):
+    """Convert raw trace text into numbered, chronological step records."""
+    if not trace_text:
+        return []
+
+    steps = []
+    for line in trace_text.splitlines():
+        raw = line.strip()
+        if not raw:
+            continue
+        # Keep test boundary markers as events
+        if raw.startswith("=== TEST START") or raw.startswith("=== TEST END"):
+            steps.append({"time": "", "source": "TEST", "kind": "Event", "message": raw})
+            continue
+
+        m = _TRACE_RE.match(raw)
+        if not m:
+            # Carry any unmatched line as generic event so nothing is lost
+            steps.append({"time": "", "source": "TRACE", "kind": "Event", "message": raw})
+            continue
+
+        msg = m.group("msg")
+        steps.append(
+            {
+                "time": m.group("ts"),
+                "source": m.group("src"),
+                "kind": _trace_kind(msg),
+                "message": msg,
+            }
+        )
+    return steps
+
+
 def generate_report(results_json_path, output_html_path, device_info=None):
     """Generate an HTML report from pytest JSON results."""
     with open(results_json_path) as f:
@@ -215,6 +306,39 @@ def generate_report(results_json_path, output_html_path, device_info=None):
     tests = data.get("tests", [])
     summary = data.get("summary", {})
     env_info = data.get("environment", {})
+
+    # Attach per-test trace logs (SSH/CresNext command traces)
+    # Also compute a flat 'duration' field per test from the nested
+    # setup/call/teardown phases (pytest-json-report stores them separately).
+    results_dir = os.path.dirname(results_json_path)
+    trace_logs = _load_trace_logs(results_dir)
+    for test in tests:
+        nodeid = test.get("nodeid", "")
+        key = _nodeid_to_trace_key(nodeid)
+        trace_text = trace_logs.get(key, "")
+        test["_trace_log"] = trace_text
+        test["_trace_steps"] = _parse_trace_steps(trace_text)
+
+        # Attach the module-level reset log so every test row has a
+        # dedicated "reset" button.  The log file is named:
+        #   _module_reset_<module_name>.log
+        # where module_name = nodeid file part converted to dotted module path.
+        # e.g. tests/test_balance.py  →  tests.test_balance
+        file_part = nodeid.split("::")[0]          # e.g. tests/test_balance.py
+        module_name = file_part.replace("/", ".").removesuffix(".py")
+        reset_key = f"_module_reset_{module_name}"
+        reset_text = trace_logs.get(reset_key, "")
+        test["_reset_log"] = reset_text
+        test["_reset_steps"] = _parse_trace_steps(reset_text)
+
+        # Compute total duration from phases
+        if "duration" not in test:
+            d = 0.0
+            for phase in ("setup", "call", "teardown"):
+                phase_data = test.get(phase)
+                if isinstance(phase_data, dict):
+                    d += phase_data.get("duration", 0)
+            test["duration"] = d
 
     # Categorize tests
     categories = {}
@@ -242,7 +366,8 @@ def generate_report(results_json_path, output_html_path, device_info=None):
     failed = summary.get("failed", 0)
     skipped = summary.get("skipped", 0)
     errors = summary.get("error", 0)
-    duration = summary.get("duration", 0)
+    # Total duration lives at JSON root (pytest-json-report), not in summary
+    duration = data.get("duration", 0) or summary.get("duration", 0)
     pass_rate = round((passed / total * 100), 1) if total > 0 else 0
 
     # Attach signal path diagrams to each category (device-aware)

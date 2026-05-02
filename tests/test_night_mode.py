@@ -40,9 +40,20 @@ class TestNightMode:
             dsp.set_zone_night_mode(1, mode_name)
             levels[mode_name] = dsp.measure_output_level("A1L")
 
+        tol = float(test_settings["level_tolerance_db"])
         if levels["Off"] > test_settings["mute_floor_db"]:
-            tolerance = test_settings["level_tolerance_db"] * 2
+            # Each compression level should reduce the loud signal
             for mode in ["Low", "Medium", "High"]:
-                assert levels[mode] <= levels["Off"] + tolerance, (
-                    f"Night mode {mode} ({levels[mode]:.2f}) should not exceed Off ({levels['Off']:.2f})"
+                assert levels[mode] <= levels["Off"] - tol, (
+                    f"Night mode {mode} ({levels[mode]:.2f}dB) did not "
+                    f"compress below Off ({levels['Off']:.2f}dB)"
                 )
+            # Verify monotonic: High ≤ Medium ≤ Low ≤ Off
+            assert levels["High"] <= levels["Medium"] + tol, (
+                f"Night mode not monotonic: High={levels['High']:.2f}dB "
+                f"> Medium={levels['Medium']:.2f}dB"
+            )
+            assert levels["Medium"] <= levels["Low"] + tol, (
+                f"Night mode not monotonic: Medium={levels['Medium']:.2f}dB "
+                f"> Low={levels['Low']:.2f}dB"
+            )

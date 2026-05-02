@@ -226,6 +226,7 @@
   .log-btn:hover { background: var(--bg3); color: var(--text); }
   .log-btn.has-error { border-color: var(--red-border); color: var(--red); }
   .log-btn.has-warn { border-color: var(--yellow-border); color: var(--yellow); }
+  .log-btn.has-trace { border-color: var(--blue-border); color: var(--blue); }
 
   /* ── Collapsible log panel ── */
   .test-logs {
@@ -251,6 +252,37 @@
     background: var(--bg2); border: 1px solid var(--bg3);
     color: var(--text2);
   }
+  .log-section.trace-log {
+    background: var(--blue-bg); border: 1px solid var(--blue-border);
+    color: #93c5fd; max-height: 400px;
+  }
+  .trace-seq {
+    display: grid;
+    gap: 0.35rem;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.74rem;
+  }
+  .trace-step {
+    display: grid;
+    grid-template-columns: 38px 96px 90px 86px 1fr;
+    gap: 0.45rem;
+    align-items: start;
+    padding: 0.3rem 0.45rem;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: 6px;
+    background: rgba(2, 6, 23, 0.25);
+  }
+  .trace-step.request { border-color: rgba(59, 130, 246, 0.45); }
+  .trace-step.response { border-color: rgba(16, 185, 129, 0.45); }
+  .trace-step.event { border-color: rgba(245, 158, 11, 0.35); }
+  .trace-step .n { color: var(--text3); text-align: right; }
+  .trace-step .ts { color: #c7d2fe; }
+  .trace-step .src { color: #93c5fd; font-weight: 600; }
+  .trace-step .kind { font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+  .trace-step.request .kind { color: #60a5fa; }
+  .trace-step.response .kind { color: #34d399; }
+  .trace-step.event .kind { color: #fbbf24; }
+  .trace-step .msg { color: #dbeafe; white-space: pre-wrap; word-break: break-word; }
   .log-section + .log-section { margin-top: 0.35rem; }
   .log-section-label {
     font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
@@ -325,7 +357,14 @@
     <div class="label">Skipped</div>
   </div>
   <div class="summary-card">
-    <div class="number">{{ summary.duration }}s</div>
+    {% set dur_s = summary.duration %}
+    {% if dur_s >= 3600 %}
+    <div class="number">{{ "%d" | format(dur_s // 3600) }}h {{ "%d" | format((dur_s % 3600) // 60) }}m</div>
+    {% elif dur_s >= 60 %}
+    <div class="number">{{ "%d" | format(dur_s // 60) }}m {{ "%d" | format(dur_s % 60) }}s</div>
+    {% else %}
+    <div class="number">{{ "%.1f" | format(dur_s) }}s</div>
+    {% endif %}
     <div class="label">Duration</div>
   </div>
 </div>
@@ -436,8 +475,14 @@
     {% set has_call_log = call_data.get('log') %}
     {% set has_setup_out = setup_data.get('stdout') %}
     {% set has_td_log = teardown_data.get('log') %}
-    {% set has_any_log = has_error or has_call_log or has_setup_out or has_td_log %}
+    {% set trace_content = test.get('_trace_log', '') %}
+    {% set trace_steps = test.get('_trace_steps', []) %}
+    {% set has_trace = trace_content|length > 0 %}
+    {% set reset_steps = test.get('_reset_steps', []) %}
+    {% set has_reset = reset_steps|length > 0 %}
+    {% set has_any_log = has_error or has_call_log or has_setup_out or has_td_log or has_trace or has_reset %}
     {% set log_id = 'log-' ~ cat_idx ~ '-' ~ loop.index %}
+    {% set reset_id = 'rst-' ~ cat_idx ~ '-' ~ loop.index %}
     <div class="test-row">
       <span class="status-dot {{ test.outcome }}"></span>
       <div class="test-name">
@@ -447,10 +492,14 @@
         {% endif %}
       </div>
       {% if has_any_log %}
-      <span class="log-btn{% if has_error %} has-error{% elif has_call_log %} has-warn{% endif %}"
-            onclick="toggleLog('{{ log_id }}')">&#x1F4CB;{% if has_error %} error{% elif has_call_log %} log{% else %} info{% endif %}</span>
+      <span class="log-btn{% if has_error %} has-error{% elif has_trace %} has-trace{% elif has_call_log %} has-warn{% endif %}"
+        onclick="toggleLog('{{ log_id }}')">&#x1F4CB;{% if has_error and has_trace %} error+trace{% elif has_error %} error{% elif has_trace %} trace{% elif has_call_log %} log{% else %} info{% endif %}</span>
       {% else %}
       <span></span>
+      {% endif %}
+      {% if has_reset %}
+      <span class="log-btn" style="border-color:#f59e0b;color:#f59e0b;margin-left:4px"
+            onclick="toggleLog('{{ reset_id }}')">&#x21BA; reset</span>
       {% endif %}
       <div class="test-duration">{{ "%.2f" | format(test.get('duration', 0)) }}s</div>
       <div class="test-status {{ test.outcome }}">{{ test.outcome }}</div>
@@ -475,6 +524,44 @@
         <div class="log-section-label">Teardown Log ({{ teardown_data.log | length }} entries)</div>{% for entry in teardown_data.log %}[{{ entry.levelname }}] {{ entry.filename }}:{{ entry.lineno }} {{ entry.msg }}
 {% endfor %}</div>
       {% endif %}
+      {% if has_trace %}
+      <div class="log-section trace-log">
+        <div class="log-section-label">Step-By-Step Trace Timeline</div>
+        {% if trace_steps|length > 0 %}
+        <div class="trace-seq">
+          {% for step in trace_steps %}
+          <div class="trace-step {{ step.kind | lower }}">
+            <span class="n">{{ loop.index }}.</span>
+            <span class="ts">{{ step.time }}</span>
+            <span class="src">{{ step.source }}</span>
+            <span class="kind">{{ step.kind }}</span>
+            <span class="msg">{{ step.message }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        Trace captured, but no structured steps could be parsed.
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% if has_reset %}
+    <div class="test-logs" id="{{ reset_id }}">
+      <div class="log-section trace-log" style="border-left-color:#f59e0b">
+        <div class="log-section-label" style="color:#f59e0b">Module Reset (runs once before this test group)</div>
+        <div class="trace-seq">
+          {% for step in reset_steps %}
+          <div class="trace-step {{ step.kind | lower }}">
+            <span class="n">{{ loop.index }}.</span>
+            <span class="ts">{{ step.time }}</span>
+            <span class="src">{{ step.source }}</span>
+            <span class="kind">{{ step.kind }}</span>
+            <span class="msg">{{ step.message }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
     </div>
     {% endif %}
     {% endfor %}

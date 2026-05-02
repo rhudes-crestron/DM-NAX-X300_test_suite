@@ -78,9 +78,9 @@ class TestBridging:
     def test_routing_accepted(self, dsp, device_cfg, test_settings):
         """Audio routing can be read for each zone in Standard mode."""
         cn = dsp.cn
-        num_zones = min(device_cfg.get("zones", 4), 4)
+        zones = device_cfg.get("selected_zones", list(range(1, device_cfg.get("zones", 4) + 1)))
 
-        for z in range(1, num_zones + 1):
+        for z in zones:
             zone_key = f"Zone{z}"
             try:
                 route = cn.get(f"/Device/AvMatrixRouting/Routes/{zone_key}/")
@@ -136,7 +136,8 @@ class TestBridging:
 
     def test_zone_name_readable(self, dsp, device_cfg, test_settings):
         """Each zone has a readable name property."""
-        for z in range(1, device_cfg.get("zones", 4) + 1):
+        zones = device_cfg.get("selected_zones", list(range(1, device_cfg.get("zones", 4) + 1)))
+        for z in zones:
             data = dsp.cn.get(f"/Device/ZoneOutputs/Zones/Zone{z}/")
             zd = (data.get("Device", {})
                   .get("ZoneOutputs", {})

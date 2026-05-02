@@ -6,7 +6,7 @@ correctly shifts the signal level through the DSP chain.
 Device state is automatically reset before and after each test by conftest.
 """
 import pytest
-import math
+import time
 
 
 class TestInputCompensation:
@@ -14,14 +14,21 @@ class TestInputCompensation:
 
     CATEGORY = "dsp_input_compensation"
 
-    @pytest.fixture(autouse=True)
-    def _skip_if_no_dsp_gain(self, device_cfg):
-        """Skip input compensation tests on fw42 where `dsp gain` is unsupported."""
-        if device_cfg.get("dsp_fw_version", 21) >= 42:
-            pytest.skip(
-                f"dsp gain command not supported on {device_cfg['model']} "
-                f"(fw{device_cfg['dsp_fw_version']})"
+    @staticmethod
+    def _set_compensation(dsp, input_ch, compensation, settle_s=0.3):
+        """Set input compensation through CresNext when available."""
+        input_num = input_ch + 1
+        if dsp.cn is not None:
+            dsp.set_input_compensation_cresnext(input_num, compensation)
+            time.sleep(settle_s)
+            src = dsp.get_input_source_audio(input_num)
+            assert src.get("Compensation") == compensation, (
+                f"Input{input_num:02d} Compensation readback mismatch: {src}"
             )
+            return
+
+        # Legacy fallback when CresNext is unavailable in this run setup.
+        dsp.set_input_gain(input_ch, compensation)
 
     @pytest.mark.parametrize("input_ch,input_name", [
         (0, "S1L"), (2, "T1L"), (4, "L1L"), (6, "L2L"),
@@ -29,7 +36,7 @@ class TestInputCompensation:
     def test_compensation_zero_baseline(self, dsp, device_cfg, test_settings,
                                          input_ch, input_name):
         """With 0dB compensation, input gain column shows 0.0."""
-        dsp.set_input_gain(input_ch, 0)
+        self._set_compensation(dsp, input_ch, 0)
         state = dsp.read_dsp_state()
         inp = state.inputs.get(input_name)
         if inp:
@@ -46,11 +53,10 @@ class TestInputCompensation:
         rather than measuring the output, because the output level is
         affected by zone processing that can drift between reads.
         """
-        import time
         input_ch = 0   # S1L
         input_name = "S1L"
 
-        dsp.set_input_gain(input_ch, compensation_db)
+        self._set_compensation(dsp, input_ch, compensation_db)
         dsp.start_tone(input_ch, 1000, -20)
         time.sleep(test_settings["signal_settle_time_s"])
 
@@ -72,7 +78,7 @@ class TestInputCompensation:
                                                   test_settings,
                                                   input_ch, input_name):
         """The Gain column in DSP state reflects the compensation value."""
-        dsp.set_input_gain(input_ch, 5)
+        self._set_compensation(dsp, input_ch, 5)
         dsp.start_tone(input_ch, 1000, -20)
 
         state = dsp.read_dsp_state()
@@ -85,8 +91,8 @@ class TestInputCompensation:
     def test_compensation_per_input_independent(self, dsp, device_cfg, test_settings):
         """Compensation on one input does not affect another."""
         # Set +5dB on S1L, 0dB on T1L
-        dsp.set_input_gain(0, 5)
-        dsp.set_input_gain(2, 0)
+        self._set_compensation(dsp, 0, 5)
+        self._set_compensation(dsp, 2, 0)
         dsp.start_tone(0, 1000, -20)
         dsp.start_tone(2, 1000, -20)
 
@@ -97,5 +103,49 @@ class TestInputCompensation:
         if s1l and t1l:
             assert abs(s1l.gain_db - 5.0) <= test_settings["level_tolerance_db"]
             assert abs(t1l.gain_db - 0.0) <= test_settings["level_tolerance_db"]
+
+    def test_compensation_affects_audio_output_level(self, dsp, device_cfg, test_settings):
+        """Input compensation must shift routed output level in the expected direction."""
+        input_ch = 0
+        output_idx = 0
+        output_name = "A1L"
+
+        try:
+            dsp.set_mixer(input_ch, output_idx, 0)
+            dsp.start_tone(input_ch, 1000, -20)
+
+            # Baseline (0 dB compensation)
+            self._set_compensation(dsp, input_ch, 0)
+            base_level = dsp.measure_mixer_level(output_name)
+
+            # Boost and cut points
+            self._set_compensation(dsp, input_ch, 5)
+            boost_level = dsp.measure_mixer_level(output_name)
+
+            self._set_compensation(dsp, input_ch, -5)
+            cut_level = dsp.measure_mixer_level(output_name)
+        finally:
+            dsp.stop_tone(input_ch)
+            dsp.clear_mixer(input_ch, output_idx)
+
+        # Verify signal exists and compensation causes clear directional changes.
+        assert base_level > test_settings["mute_floor_db"], (
+            f"No signal at {output_name} baseline: {base_level:.2f} dB"
+        )
+        assert boost_level > base_level + 2.0, (
+            f"+5 dB compensation did not increase {output_name} enough: "
+            f"base={base_level:.2f}dB boost={boost_level:.2f}dB"
+        )
+        assert cut_level < base_level - 2.0, (
+            f"-5 dB compensation did not decrease {output_name} enough: "
+            f"base={base_level:.2f}dB cut={cut_level:.2f}dB"
+        )
+
+        # End-to-end spread should be close to 10 dB; allow margin for metering drift.
+        spread = boost_level - cut_level
+        assert spread >= 7.0, (
+            f"Input compensation spread too small at {output_name}: "
+            f"boost-cut={spread:.2f} dB (expected >= 7 dB)"
+        )
 
 

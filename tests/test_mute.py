@@ -52,7 +52,7 @@ class TestMute:
 
         sig_ch = device_cfg["signal_generator"]["channel"]
         dsp.start_sig_tone()
-        dsp.set_mixer(sig_ch, output_idx, 0)
+        dsp.route_sig_to_output(output_idx)
 
         # Mute this zone
         dsp.set_zone_mute(zone, True)

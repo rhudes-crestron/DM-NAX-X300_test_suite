@@ -9,6 +9,7 @@ import time
 import math
 import logging
 from .dsp_parser import parse_dsp_output, parse_mixer_output
+from .test_trace import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -76,16 +77,50 @@ class DSPController:
         """
         num_outputs = self.cfg.get("mixer_outputs", 10)
         cmds = [f"dsp mix {self.sig_ch} {out} -200" for out in range(num_outputs)]
-        self.ssh.execute(" ; ".join(cmds), timeout=10)
+        for cmd in cmds:
+            self.ssh.execute(cmd, timeout=10)
         logger.info("Cleared all %d sig routes for ch %d", num_outputs, self.sig_ch)
+
+    def _set_tone_source_for_zone(self, zone):
+        """Route a zone to tone input using the best CresNext path for platform mode.
+
+        8ZSA/4ZSP fw42 devices in MP1 often require the StreamRoutings-style
+        route path. Fall back to per-zone AvMatrixRouting if unsupported.
+        """
+        if self.cn is None:
+            return
+
+        tone_input = self.cfg.get("dsp_tone_input", "Input01")
+        model = str(self.cfg.get("model", "")).upper()
+
+        if model in {"8ZSA", "4ZSP"}:
+            try:
+                self.cn.set_zone_sources_streamrouting({int(zone): tone_input})
+                return
+            except Exception as e:
+                logger.warning(
+                    "StreamRoutings path failed for Zone%d -> %s (%s); falling back",
+                    zone,
+                    tone_input,
+                    e,
+                )
+
+        self.cn.set_zone_source(zone, tone_input)
 
     def route_sig_to_output(self, output_ch, gain_db=0):
         """Route signal generator to a specific output channel.
 
-        On fw42 devices, clears all other routes first to guarantee
-        that signal appears only on the target output.
+        On fw42 devices, first map the target zone source via CresNext
+        (AvMatrixRouting) to the configured tone input, then apply DSP
+        mixer routing for the specific output under test.
         """
         if self.cfg.get("dsp_fw_version", 21) >= 42:
+            # Prefer CresNext path for zone routing/mapping whenever available.
+            if self.cn is not None:
+                zone = self.zone_for_output(output_ch)
+                max_zone = self.cfg.get("zones", 4)
+                if 1 <= zone <= max_zone:
+                    self._set_tone_source_for_zone(zone)
             self.clear_all_sig_routes()
         return self.set_mixer(self.sig_ch, output_ch, gain_db)
 
@@ -95,9 +130,27 @@ class DSPController:
     # ------------------------------------------------------------------
     # Input compensation / gain
     # ------------------------------------------------------------------
-    def set_input_gain(self, channel, gain_db):
-        """Set input compensation (gain offset in dB) on a physical input channel."""
-        out = self.ssh.execute(f"dsp gain {channel} set {gain_db}")
+    def set_input_gain(self, channel, gain_db, trace_source="SSH"):
+        """Set input compensation (gain offset in dB) on a physical input channel.
+
+        Some images reject one syntax variant regardless of reported fw.
+        Try the predicted command first, then fallback to the alternate form.
+        """
+        fw = self.cfg.get("dsp_fw_version", 21)
+        primary = f"dsp gain {channel} {gain_db}" if fw >= 42 else f"dsp gain {channel} set {gain_db}"
+        fallback = f"dsp gain {channel} set {gain_db}" if fw >= 42 else f"dsp gain {channel} {gain_db}"
+
+        out = self.ssh.execute(primary, trace_source=trace_source)
+        low = out.lower()
+        if "invalid num format" in low or "invalid command" in low:
+            out = self.ssh.execute(fallback, trace_source=trace_source)
+            low = out.lower()
+            if "invalid num format" in low or "invalid command" in low:
+                raise RuntimeError(
+                    f"Input gain rejected for ch={channel} gain={gain_db}; "
+                    f"tried '{primary}' and '{fallback}'"
+                )
+
         logger.info("Input gain: ch=%d gain=%s dB", channel, gain_db)
         return out
 
@@ -175,21 +228,95 @@ class DSPController:
         zone_info = self.cn.get_zone_info(zone)
         return zone_info.get("IsSignalDetected", None)
 
+    def is_signal_clipping(self, zone):
+        """Return CresNext IsSignalClipping flag for a zone."""
+        if self.cn is None:
+            return None
+        zone_info = self.cn.get_zone_info(zone)
+        return zone_info.get("IsSignalClipping", None)
+
     def assert_signal_presence(self, zone, expected=True):
         """Assert CresNext IsSignalDetected matches expected value for a zone."""
         if self.cn is None:
             return
-        detected = self.is_signal_detected(zone)
         label = "present" if expected else "absent"
+        log_event("VALIDATE", f"check IsSignalDetected: zone={zone} expected={expected}")
+
+        # Poll briefly for status convergence after route/level changes.
+        deadline = time.time() + 3.0
+        detected = None
+        while time.time() < deadline:
+            detected = self.is_signal_detected(zone)
+            if detected is expected:
+                logger.info("Zone %d: IsSignalDetected=%s ✓", zone, detected)
+                log_event(
+                    "VALIDATE",
+                    f"check IsSignalDetected: zone={zone} actual={detected} result=PASS",
+                )
+                return
+            time.sleep(0.25)
+
+        # Include DSP level for diagnosis but do not bypass status correctness.
+        out_name = f"A{zone}L"
+        level = self.measure_output_level(out_name, settle_time=0.1)
+        log_event(
+            "VALIDATE",
+            (
+                f"check IsSignalDetected: zone={zone} actual={detected} "
+                f"expected={expected} result=FAIL {out_name}={level:.2f}dB"
+            ),
+        )
+
         assert detected is expected, (
             f"Zone {zone}: IsSignalDetected={detected}, expected {expected} "
-            f"(signal should be {label})"
+            f"(signal should be {label}); {out_name}={level:.2f} dB"
         )
-        logger.info("Zone %d: IsSignalDetected=%s ✓", zone, detected)
+
+    def assert_signal_not_clipping(self, zone):
+        """Assert CresNext IsSignalClipping is not True for a zone."""
+        if self.cn is None:
+            return
+
+        log_event("VALIDATE", f"check IsSignalClipping: zone={zone} expected=False")
+
+        # Poll briefly so transient status updates can settle.
+        deadline = time.time() + 3.0
+        clipping = None
+        while time.time() < deadline:
+            clipping = self.is_signal_clipping(zone)
+            if clipping is not True:
+                log_event(
+                    "VALIDATE",
+                    f"check IsSignalClipping: zone={zone} actual={clipping} result=PASS",
+                )
+                return
+            time.sleep(0.25)
+
+        out_name = f"A{zone}L"
+        level = self.measure_output_level(out_name, settle_time=0.1)
+        log_event(
+            "VALIDATE",
+            (
+                f"check IsSignalClipping: zone={zone} actual={clipping} "
+                f"expected=False result=FAIL {out_name}={level:.2f}dB"
+            ),
+        )
+        assert clipping is not True, (
+            f"Zone {zone}: IsSignalClipping={clipping}, expected not True; "
+            f"{out_name}={level:.2f} dB"
+        )
 
     def set_input_mute_cresnext(self, input_num, muted):
         """Mute/unmute an input source via CresNext (1-indexed)."""
         return self.cn.set_input_mute(input_num, muted)
+
+    def set_input_compensation_cresnext(self, input_num, compensation):
+        """Set input SourceAudio Compensation via CresNext (1-indexed input)."""
+        return self.cn.set_input_compensation(input_num, compensation)
+
+    def get_input_source_audio(self, input_num):
+        """Read input SourceAudio via CresNext (1-indexed input)."""
+        return self.cn.get_input_source_audio(input_num)
 
     # ------------------------------------------------------------------
     # Ducker / Limiter / AGC
@@ -221,7 +348,19 @@ class DSPController:
     def read_dsp_state(self):
         """Read and parse the full DSP state table."""
         raw = self.ssh.execute("dsp")
-        return parse_dsp_output(raw)
+        state = parse_dsp_output(raw)
+        # Log one row per output channel so the HTML trace viewer shows a
+        # readable table matching the DSP terminal "Output dB" columns.
+        if state.outputs:
+            log_event("SSH", f"{'Name':<8}  {'Output dB':>10}  {'Ducker dB':>10}")
+            log_event("SSH", f"{'--------':<8}  {'----------':>10}  {'----------':>10}")
+            for name, out in sorted(state.outputs.items()):
+                if name.startswith("Z"):   # skip fw42 zone-name aliases (Z1L…)
+                    continue
+                o_db = f"{out.output_db:>10.1f}" if out.output_db > float('-inf') else f"{'  -inf':>10}"
+                d_db = f"{out.ducker_db:>10.1f}" if out.ducker_db > float('-inf') else f"{'  -inf':>10}"
+                log_event("SSH", f"{name:<8}  {o_db}  {d_db}")
+        return state
 
     def read_mixer_state(self):
         """Read and parse the mixer matrix."""
@@ -235,7 +374,16 @@ class DSPController:
         time.sleep(settle_time)
         state = self.read_dsp_state()
         if output_name in state.outputs:
-            return state.outputs[output_name].output_db
+            level = state.outputs[output_name].output_db
+            log_event(
+                "VALIDATE",
+                f"check output level: output={output_name} measured={level:.2f}dB",
+            )
+            return level
+        log_event(
+            "VALIDATE",
+            f"check output level: output={output_name} missing_in_dsp_state -> measured=-inf",
+        )
         return float("-inf")
 
     def measure_mixer_level(self, output_name, settle_time=None):

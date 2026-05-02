@@ -4,8 +4,10 @@ Provides authenticated HTTPS access to read and write device properties
 via the CresNext JSON web services interface.
 """
 import logging
+import json
 import requests
 import urllib3
+from .test_trace import log_event
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -62,20 +64,24 @@ class CresNextClient:
         # Try HTTP first; some devices (4ZSP) redirect 301 → HTTPS,
         # so fall back to HTTPS if the HTTP attempt fails or redirects.
         try:
+            log_event("CRESNEXT", f"GET http://{self.ip}/userlogin.html")
             r = self._session.get(
                 f"http://{self.ip}/userlogin.html", headers=login_headers,
                 timeout=15, allow_redirects=False,
             )
             if r.status_code in (301, 302):
+                log_event("CRESNEXT", f"GET https://{self.ip}/userlogin.html (redirect)")
                 self._session.get(
                     f"{base}/userlogin.html", headers=login_headers, timeout=15,
                 )
         except requests.exceptions.ConnectionError:
+            log_event("CRESNEXT", f"GET https://{self.ip}/userlogin.html (fallback)")
             self._session.get(
                 f"{base}/userlogin.html", headers=login_headers, timeout=15,
             )
 
         # POST credentials via HTTPS
+        log_event("CRESNEXT", f"POST https://{self.ip}/userlogin.html (login)")
         r = self._session.post(
             f"{base}/userlogin.html",
             data={"login": self.username, "passwd": self.password},
@@ -122,11 +128,14 @@ class CresNextClient:
         self._ensure_connected()
         if not uri.startswith("/"):
             uri = "/" + uri
+        log_event("CRESNEXT", f"GET https://{self.ip}{uri}")
         r = self._session.get(
             f"https://{self.ip}{uri}", headers=self._headers(), timeout=30
         )
         r.raise_for_status()
-        return r.json()
+        payload = r.json()
+        log_event("CRESNEXT", f"RESP {r.status_code} GET ok")
+        return payload
 
     def set(self, uri, body):
         """POST a CresNext property change.
@@ -138,6 +147,10 @@ class CresNextClient:
         self._ensure_connected()
         if not uri.startswith("/"):
             uri = "/" + uri
+        body_s = json.dumps(body, separators=(",", ":"))
+        if len(body_s) > 500:
+            body_s = body_s[:500] + "..."
+        log_event("CRESNEXT", f"POST https://{self.ip}{uri} body={body_s}")
         r = self._session.post(
             f"https://{self.ip}{uri}",
             json=body,
@@ -146,6 +159,15 @@ class CresNextClient:
         )
         r.raise_for_status()
         result = r.json()
+        status_items = []
+        actions = result.get("Actions", [])
+        for action in actions:
+            for res in action.get("Results", []):
+                status_items.append(f"{res.get('StatusId', 0)}:{res.get('StatusInfo', '')}")
+        if status_items:
+            log_event("CRESNEXT", f"RESP {r.status_code} POST statuses={'; '.join(status_items[:6])}")
+        else:
+            log_event("CRESNEXT", f"RESP {r.status_code} POST ok")
         # Check CresNext response for errors
         actions = result.get("Actions", [])
         for action in actions:
@@ -237,6 +259,50 @@ class CresNextClient:
         }
         return self.set(uri, body)
 
+    def get_zone_source(self, zone):
+        """Read the current AudioSource for a zone from AvMatrixRouting.
+
+        Returns the AudioSource string (e.g. 'Input01', 'Input05') or None
+        if the response does not contain the expected field.
+        """
+        uri = f"/Device/AvMatrixRouting/Routes/Zone{zone}/"
+        data = self.get(uri)
+        return (
+            data.get("Device", {})
+            .get("AvMatrixRouting", {})
+            .get("Routes", {})
+            .get(f"Zone{zone}", {})
+            .get("AudioSource", None)
+        )
+
+    def set_zone_sources_streamrouting(self, zone_to_source):
+        """Set multiple zone AudioSource values in one StreamRoutings-style call.
+
+        Uses parent path and comma-separated zone/source lists (as documented in
+        AP_TestCases StreamRoutings for MP1 on 8-zone platforms).
+        """
+        if not zone_to_source:
+            return {}
+
+        ordered = sorted((int(z), str(src)) for z, src in zone_to_source.items())
+        zone_csv = ",".join(f"Zone{z}" for z, _ in ordered)
+        source_csv = ",".join(src for _, src in ordered)
+
+        uri = f"/Device/AvMatrixRouting/Routes/{zone_csv}/"
+        body = {
+            "Device": {
+                "AvMatrixRouting": {
+                    "Routes": {
+                        zone_csv: {
+                            "AudioSource": source_csv
+                        }
+                    }
+                }
+            }
+        }
+        logger.info("CresNext SET StreamRoutings %s -> %s", zone_csv, source_csv)
+        return self.set(uri, body)
+
     # ------------------------------------------------------------------
     # Convenience: Input source properties
     # ------------------------------------------------------------------
@@ -258,6 +324,39 @@ class CresNextClient:
             }
         }
         logger.info("CresNext SET %s IsMuteEnabled=%s", input_key, muted)
+        return self.set(uri, body)
+
+    def get_input_source_audio(self, input_num):
+        """Read SourceAudio properties for an input source (1-indexed)."""
+        input_key = f"Input{input_num:02d}"
+        uri = f"/Device/InputSources/Inputs/{input_key}/SourceAudio/"
+        data = self.get(uri)
+        return (
+            data.get("Device", {})
+            .get("InputSources", {})
+            .get("Inputs", {})
+            .get(input_key, {})
+            .get("SourceAudio", {})
+        )
+
+    def set_input_compensation(self, input_num, compensation):
+        """Set input SourceAudio Compensation (-100..100, in 0.1 dB steps)."""
+        input_key = f"Input{input_num:02d}"
+        uri = f"/Device/InputSources/Inputs/{input_key}/SourceAudio/"
+        body = {
+            "Device": {
+                "InputSources": {
+                    "Inputs": {
+                        input_key: {
+                            "SourceAudio": {
+                                "Compensation": int(compensation)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        logger.info("CresNext SET %s Compensation=%s", input_key, compensation)
         return self.set(uri, body)
 
     # ------------------------------------------------------------------

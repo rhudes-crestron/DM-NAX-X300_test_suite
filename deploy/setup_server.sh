@@ -25,12 +25,22 @@ if ! id "${SERVICE_USER}" &>/dev/null; then
     useradd -r -m -d /home/${SERVICE_USER} -s /bin/bash ${SERVICE_USER}
 fi
 
-# 3. Clone repository
+# 3. Clone repository (skip if files already present — e.g. manual copy/rsync)
 echo "[3/7] Cloning test suite..."
-if [ ! -d "${INSTALL_DIR}" ]; then
-    git clone "${REPO_URL}" "${INSTALL_DIR}"
+if [ -f "${INSTALL_DIR}/conftest.py" ]; then
+    echo "  → Suite files already present at ${INSTALL_DIR}, skipping git clone."
+    echo "  → To update later: cd ${INSTALL_DIR} && sudo -u ${SERVICE_USER} git pull origin master"
+elif [ ! -d "${INSTALL_DIR}" ]; then
+    # Clone as the invoking user if possible, fall back to root
+    CLONE_USER="${SUDO_USER:-root}"
+    sudo -u "${CLONE_USER}" git clone "${REPO_URL}" "${INSTALL_DIR}" || {
+        echo "  ✗ Git clone failed. Copy suite files manually to ${INSTALL_DIR}/ and re-run."
+        exit 1
+    }
 else
-    cd "${INSTALL_DIR}" && git pull origin master
+    CLONE_USER="${SUDO_USER:-root}"
+    cd "${INSTALL_DIR}" && sudo -u "${CLONE_USER}" git pull origin master || \
+        echo "  ⚠ Git pull failed — continuing with existing files."
 fi
 chown -R ${SERVICE_USER}:${SERVICE_USER} "${INSTALL_DIR}"
 

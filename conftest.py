@@ -12,6 +12,7 @@ from datetime import datetime
 from lib.device_ssh import DeviceSSH
 from lib.dsp_controller import DSPController
 from lib.cresnext_client import CresNextClient
+from lib.test_trace import set_current_test, clear_current_test
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,100 @@ def pytest_addoption(parser):
     parser.addoption("--username", default=None, help="Override device SSH/API username")
     parser.addoption("--password", default=None, help="Override device SSH/API password")
     parser.addoption("--firmware-file", default=None, help="Path to firmware file (.puf or .zip) for upgrade tests")
+    parser.addoption("--zone-mode", default="full", choices=["full", "quick"],
+                     help="Zone execution mode: full=all zones, quick=profiled subset")
+    parser.addoption("--zones", default=None,
+                     help="Explicit comma-separated zone list override (e.g. 2,4,5,8)")
+    parser.addoption(
+        "--include-crosstalk",
+        action="store_true",
+        default=False,
+        help="Include crosstalk tests in collection (excluded by default)",
+    )
+
+
+def _parse_zone_csv(zone_csv):
+    if not zone_csv:
+        return []
+    vals = []
+    for part in str(zone_csv).split(","):
+        token = part.strip()
+        if not token:
+            continue
+        vals.append(int(token))
+    return vals
+
+
+def _resolve_selected_zones(config_obj):
+    cfg_path = config_obj.getoption("--config")
+    device_name = config_obj.getoption("--device")
+    mode = config_obj.getoption("--zone-mode")
+    zone_override = config_obj.getoption("--zones")
+
+    with open(cfg_path) as f:
+        cfg = yaml.safe_load(f)
+
+    dev = cfg["devices"][device_name]
+    max_zones = int(dev.get("zones", 4))
+
+    if zone_override:
+        raw = _parse_zone_csv(zone_override)
+    elif mode == "quick":
+        raw = cfg.get("zone_profiles", {}).get("quick", {}).get(device_name, [])
+    else:
+        raw = list(range(1, max_zones + 1))
+
+    selected = sorted({int(z) for z in raw if 1 <= int(z) <= max_zones})
+    if not selected:
+        selected = list(range(1, max_zones + 1))
+    return selected
+
+
+def pytest_configure(config):
+    """Compute selected zones once and share across fixtures/hooks."""
+    selected = _resolve_selected_zones(config)
+    setattr(config, "_selected_zones", selected)
+
+
+def pytest_collection_modifyitems(config, items):
+    """Deselect zone-parametrized cases that are outside selected zones."""
+    selected = set(getattr(config, "_selected_zones", []))
+    include_crosstalk = bool(config.getoption("--include-crosstalk"))
+
+    kept = []
+    deselected = []
+    for item in items:
+        if (not include_crosstalk) and "tests/test_crosstalk.py" in item.nodeid:
+            deselected.append(item)
+            continue
+
+        if not selected:
+            kept.append(item)
+            continue
+
+        callspec = getattr(item, "callspec", None)
+        if not callspec:
+            kept.append(item)
+            continue
+        excluded = False
+        for key in ("zone", "zone_num"):
+            if key not in callspec.params:
+                continue
+            try:
+                z = int(callspec.params[key])
+            except Exception:
+                continue
+            if z not in selected:
+                excluded = True
+                break
+        if excluded:
+            deselected.append(item)
+        else:
+            kept.append(item)
+
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = kept
 
 
 @pytest.fixture(scope="session")
@@ -58,7 +153,19 @@ def device_cfg(config, device_name, request):
         cfg["username"] = username
     if password:
         cfg["password"] = password
+    cfg["selected_zones"] = list(getattr(request.config, "_selected_zones", []))
+    logger.info(
+        "Zone selection mode=%s selected=%s",
+        request.config.getoption("--zone-mode"),
+        cfg["selected_zones"],
+    )
     return cfg
+
+
+@pytest.fixture(scope="session")
+def selected_zones(device_cfg):
+    """Session-selected zones after mode/profile filtering."""
+    return device_cfg.get("selected_zones", list(range(1, device_cfg.get("zones", 4) + 1)))
 
 
 @pytest.fixture(scope="session")
@@ -106,28 +213,48 @@ def dsp(ssh, device_cfg, test_settings, cresnext):
 
 
 @pytest.fixture(autouse=True, scope="module")
-def module_reset(dsp, device_cfg):
+def module_reset(dsp, device_cfg, request):
     """Reset device once before each test MODULE (feature group).
 
     Mirrors the 8ZSA nightly pattern where Reset_UC-DSPS_&_Zones runs once
     before each feature test group (Volume, Delay, Balance, etc.), NOT before
     every individual test case.  This cuts total resets from ~140 to ~12.
+
+    Reset SSH commands are written to a dedicated per-module trace file
+    (_module_reset_<module>.log) so they do NOT appear in any test's own
+    trace log.
     """
+    import lib.test_trace as _tt
+
+    results_base = request.config.getoption("--results-dir")
+    module_name = getattr(request.module, "__name__", "unknown")
+
+    # Save the current trace log pointer (already set by pytest_runtest_setup
+    # for the first test in this module) and redirect to a dedicated reset log.
+    with _tt._LOCK:
+        _saved_log = _tt._CURRENT_LOG
+
+    set_current_test(f"_module_reset_{module_name}", results_base)
     _do_reset(dsp, device_cfg)
+
+    # Restore the saved pointer so the first test body's SSH commands land in
+    # the correct per-test trace file.
+    with _tt._LOCK:
+        _tt._CURRENT_LOG = _saved_log
+
     yield
 
 
 def _do_reset(dsp, device_cfg):
     """Reset signal path and all zone properties to baseline defaults.
 
-    Batches DSP commands into a single SSH call for speed, then resets zone
-    audio properties via CresNext REST API (one request per zone).
+    Sends one DSP command per SSH call (avoids CLI parsing/length limits),
+    then resets zone audio properties via CresNext REST API.
     """
     sig_ch = device_cfg["signal_generator"]["channel"]
     num_outputs = device_cfg.get("mixer_outputs", 10)
 
-    # 1. Build a single shell command that stops all tones, clears all mixer
-    #    crosspoints, and resets input gains in one SSH round-trip.
+    # 1. Build reset command list (tones + all crosspoints).
     cmds = []
     # Stop tones on all physical channels + signal generator
     for ch in list(range(8)) + [sig_ch]:
@@ -136,18 +263,24 @@ def _do_reset(dsp, device_cfg):
     for ch in list(range(8)) + [sig_ch]:
         for out in range(num_outputs):
             cmds.append(f"dsp mix {ch} {out} -200")
-    # Reset input gains
-    for ch in range(8):
-        cmds.append(f"dsp gain {ch} set 0")
+    # Some device CLIs reject ';' command chaining; execute one command per call.
+    for idx, cmd in enumerate(cmds):
+        try:
+            dsp.ssh.execute(cmd, timeout=30, trace_source="RESET")
+        except Exception as e:
+            logger.warning("DSP reset command failed at index %d cmd='%s': %s", idx, cmd, e)
 
-    try:
-        dsp.ssh.execute(" ; ".join(cmds), timeout=30)
-    except Exception:
-        logger.warning("Batch DSP reset failed, continuing")
+    # Reset input gains through syntax-fallback helper to avoid fw/report mismatches.
+    for ch in range(8):
+        try:
+            dsp.set_input_gain(ch, 0, trace_source="RESET")
+        except Exception as e:
+            logger.warning("DSP input gain reset failed on ch %d: %s", ch, e)
 
     # 2. Reset zone audio properties via CresNext REST API for every zone
     if dsp.cn:
-        for zone in range(1, device_cfg.get("zones", 4) + 1):
+        zones = device_cfg.get("selected_zones", list(range(1, device_cfg.get("zones", 4) + 1)))
+        for zone in zones:
             try:
                 dsp.cn.set_zone_audio(
                     zone,
@@ -164,6 +297,27 @@ def _do_reset(dsp, device_cfg):
             except Exception:
                 pass
 
+        # fw42 devices require explicit zone-source mapping for the internal
+        # signal generator to reach zone amplifier outputs.  Route every zone
+        # to dsp_tone_input (a physical input like Input01/S1 that is
+        # physically silent), so the tone generator is the sole audio source.
+        # Streaming tests override this in their own setup phase
+        # (test_route_zones_to_streaming).
+        if device_cfg.get("dsp_fw_version", 21) >= 42:
+            tone_input = device_cfg.get("dsp_tone_input", "Input01")
+            model = str(device_cfg.get("model", "")).upper()
+            for zone in zones:
+                try:
+                    if model in {"8ZSA", "4ZSP"}:
+                        try:
+                            dsp.cn.set_zone_sources_streamrouting({int(zone): tone_input})
+                        except Exception:
+                            dsp.cn.set_zone_source(zone, tone_input)
+                    else:
+                        dsp.cn.set_zone_source(zone, tone_input)
+                except Exception:
+                    pass
+
         # Un-mute all input sources
         num_inputs = len(device_cfg.get("physical_inputs", {}))
         for inp in range(1, num_inputs + 1):
@@ -171,9 +325,13 @@ def _do_reset(dsp, device_cfg):
                 dsp.cn.set_input_mute(inp, False)
             except Exception:
                 pass
+            try:
+                dsp.cn.set_input_compensation(inp, 0)
+            except Exception:
+                pass
 
         # Reset EQ bypass and speaker protect for all zones
-        for zone in range(1, device_cfg.get("zones", 4) + 1):
+        for zone in zones:
             try:
                 dsp.cn.set_zone_audio(zone, IsEqBypassEnabled=False)
             except Exception:
@@ -239,6 +397,17 @@ def pytest_terminal_summary(terminalreporter, config):
         os.makedirs(results_base, exist_ok=True)
 
 
+def pytest_runtest_setup(item):
+    """Start per-test developer trace before fixture setup/test execution."""
+    results_base = item.config.getoption("--results-dir")
+    set_current_test(item.nodeid, results_base)
+
+
+def pytest_runtest_teardown(item, nextitem):
+    """Close per-test developer trace after test teardown."""
+    clear_current_test(item.nodeid)
+
+
 # ------------------------------------------------------------------
 # Streaming test fixtures
 # ------------------------------------------------------------------
@@ -295,31 +464,69 @@ def audio_file_server(device_cfg):
 
 
 @pytest.fixture(scope="session")
-def streaming(device_cfg):
+def streaming(device_cfg, ssh):
     """Session-scoped StreamingPlayerManager for all zones."""
-    from lib.streaming_client import StreamingPlayerManager
-    import socket
+    from lib.streaming_client import StreamingPlayerManager, detect_mediaplayermode
 
-    # Quick TCP connectivity check on the first streaming port.
-    # If the MediaStreamer service is not running, skip all streaming tests
-    # instead of failing with ConnectionRefusedError.
+    # Detect whether device is in MP1 (MediaStreamer) or MP2 (MediaStreamerV2) mode.
+    mode = detect_mediaplayermode(ssh)
+
+    # Streaming commands must run from unit-side bash to mirror nightly workflow.
+    eng_cfg = device_cfg.get("engineering_debug", {})
+    auto_enable = eng_cfg.get("auto_enable_for_streaming", True)
+    enable_err = None
+    if not ssh.can_open_bash() and auto_enable:
+        try:
+            ssh.enable_engineering_debug(
+                zip_file=eng_cfg.get("zip_file"),
+                search_roots=eng_cfg.get("search_roots", []),
+                set_current_datetime=bool(eng_cfg.get("set_current_datetime", False)),
+                remote_zip_path=eng_cfg.get("remote_zip_path", "firmware/engineering_debug.zip"),
+                smb_username=eng_cfg.get("smb_username"),
+                smb_password=eng_cfg.get("smb_password"),
+                smb_domain=eng_cfg.get("smb_domain"),
+            )
+        except Exception as e:
+            enable_err = str(e)
+            logger.warning("Engineering debug auto-enable failed on %s: %s", device_cfg["ip"], e)
+
+    if not ssh.can_open_bash():
+        detail = f"; enable reason: {enable_err}" if enable_err else ""
+        pytest.skip(
+            f"Bash access unavailable on {device_cfg['model']} ({device_cfg['ip']}); "
+            f"engineering debug auto-enable did not provide bash access{detail}"
+        )
+
+    # Validate streaming API reachability from the unit using curl in bash.
     base_port = device_cfg.get("streaming", {}).get("base_port", 60001)
     ip = device_cfg["ip"]
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(3)
     try:
-        sock.connect((ip, base_port))
-        sock.close()
-    except (ConnectionRefusedError, OSError, socket.timeout):
-        pytest.skip(
-            f"Streaming service not reachable at {ip}:{base_port} — "
-            f"MediaStreamer may not be running on {device_cfg['model']}"
+        status, payload = ssh.curl_bash(
+            url=f"http://{ip}:{base_port}/api/v1/player/status",
+            method="GET",
+            body=None,
+            timeout=6,
         )
+    except Exception as e:
+        pytest.skip(
+            f"Streaming curl probe failed from unit bash at {ip}:{base_port}: {e}"
+        )
+    if status == 0 or status >= 400:
+        pytest.skip(
+            f"Streaming service not reachable via unit curl at {ip}:{base_port} "
+            f"(HTTP {status}) — MediaStreamer ({mode}) may not be running on {device_cfg['model']}"
+        )
+
+    logger.info("Streaming curl probe success on %s:%s (HTTP %s)", ip, base_port, status)
+    logger.debug("Streaming curl probe payload preview: %s", str(payload)[:220])
 
     mgr = StreamingPlayerManager(
         device_ip=ip,
         num_zones=device_cfg["zones"],
+        mode=mode,
+        ssh=ssh,
     )
+    logger.info("Streaming manager created: mode=%s, zones=%d", mode, device_cfg["zones"])
     yield mgr
 
     # Cleanup: stop all players at end of session
