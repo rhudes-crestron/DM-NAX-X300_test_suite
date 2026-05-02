@@ -394,10 +394,116 @@ before starting DSP tests.
 
 ## 11. Running on the Build Server (Nightly Timer)
 
-The build server runs the full suite automatically every night at **01:00 local time**
-using a systemd timer.
+The build server (`nj6v-docker-04`) runs the full suite automatically every night
+at **01:00 local time** using a systemd timer.
 
-### Systemd unit locations (build server: `/opt/dmnax-test-suite/`)
+---
+
+### ⚠️ Critical: Always use the venv Python
+
+The suite is installed in a Python virtual environment at
+`/opt/dmnax-test-suite/venv/`.  **Never use bare `python3`** — it picks up the
+system interpreter which is missing `paramiko`, `pytest-json-report`, and other
+required packages.
+
+```bash
+# WRONG — uses system Python → "No module named 'paramiko'" errors
+python3 orchestrator.py
+
+# CORRECT — uses venv Python with all dependencies installed
+cd /opt/dmnax-test-suite
+venv/bin/python3 orchestrator.py
+```
+
+Add a permanent alias so you never have to remember this (run once per user):
+
+```bash
+echo 'alias dmnax-run="cd /opt/dmnax-test-suite && venv/bin/python3 orchestrator.py"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+---
+
+### First-time server setup
+
+```bash
+# 1. Clone the repo as builduser (who has the SSH key registered on GitHub)
+sudo mkdir -p /opt/dmnax-test-suite
+sudo chown builduser:builduser /opt/dmnax-test-suite
+git clone git@nj-github.crestron.crestron.com:CrestronEngineering/DM-NAX_test_suite.git \
+    /opt/dmnax-test-suite
+
+# 2. Run setup as root (skips git clone since files are already present)
+sudo bash /opt/dmnax-test-suite/deploy/setup_server.sh
+```
+
+`setup_server.sh` installs system packages, creates the `dmnax-test` service user,
+creates the venv, installs Python dependencies (including `paramiko`), and
+installs the systemd units.
+
+If pip install fails silently or packages are missing after setup:
+
+```bash
+sudo /opt/dmnax-test-suite/venv/bin/pip install -r /opt/dmnax-test-suite/requirements.txt
+# Then verify:
+/opt/dmnax-test-suite/venv/bin/python3 -c "import paramiko, pytest, requests; print('OK')"
+```
+
+Fix the urllib3/requests version warning:
+
+```bash
+sudo /opt/dmnax-test-suite/venv/bin/pip install --upgrade "urllib3<2" requests chardet
+```
+
+---
+
+### Updating the suite (after code changes on dev machine)
+
+```bash
+# SSH into the build server as builduser
+cd /opt/dmnax-test-suite
+
+# Allow git to operate on the directory (one-time, if not already set)
+sudo git config --system --add safe.directory /mnt/data/opt/dmnax-test-suite
+
+# Fix ownership if root took over the .git directory
+sudo chown -R builduser:builduser /opt/dmnax-test-suite
+
+# Pull latest changes
+git pull origin master
+```
+
+---
+
+### Manual runs on the build server
+
+```bash
+cd /opt/dmnax-test-suite
+
+# Run all enabled devices (full nightly equivalent, no upgrade)
+venv/bin/python3 orchestrator.py --skip-upgrade
+
+# Run a specific device only
+venv/bin/python3 orchestrator.py --targets DM-NAX-4ZSP --skip-upgrade
+venv/bin/python3 orchestrator.py --targets DM-NAX-8ZSA --skip-upgrade
+venv/bin/python3 orchestrator.py --targets DM-NAX-4ZSA --skip-upgrade
+
+# Run with firmware upgrade
+venv/bin/python3 orchestrator.py --targets DM-NAX-4ZSP
+
+# Run a single test file against one device
+venv/bin/python3 -m pytest tests/test_signal_routing.py \
+    --device DM-NAX-4ZSP --config config/devices.yaml -v
+
+# Override device IP at runtime (without editing devices.yaml)
+venv/bin/python3 -m pytest tests/test_signal_routing.py \
+    --device DM-NAX-4ZSP --config config/devices.yaml \
+    --ip dm-nax-4zsp-00107fca06ff -v
+```
+
+---
+
+### Systemd units (build server: `/opt/dmnax-test-suite/`)
 
 | File                        | Purpose                                     |
 |-----------------------------|---------------------------------------------|
@@ -405,14 +511,12 @@ using a systemd timer.
 | `dmnax-nightly.service`     | Runs `orchestrator.py --schedule nightly`   |
 | `dmnax-dashboard.service`   | Serves the web dashboard on port 8080       |
 
-### Common build-server commands (run as root or with sudo)
-
 ```bash
 # Check timer status and next trigger time
 systemctl status dmnax-nightly.timer
 
 # Manually trigger a nightly run right now (does not wait for 01:00)
-systemctl start dmnax-nightly.service
+sudo systemctl start dmnax-nightly.service
 
 # Watch live log output during a run
 journalctl -fu dmnax-nightly.service
@@ -423,14 +527,36 @@ tail -f /var/log/dmnax-test/nightly.log
 systemctl status dmnax-dashboard.service
 
 # Restart dashboard after a code change
-systemctl restart dmnax-dashboard.service
+sudo systemctl restart dmnax-dashboard.service
 
 # Change the nightly time (e.g. to 02:30)
 # Edit /etc/systemd/system/dmnax-nightly.timer → OnCalendar=*-*-* 02:30:00
-# then:
-systemctl daemon-reload
-systemctl restart dmnax-nightly.timer
+sudo systemctl daemon-reload
+sudo systemctl restart dmnax-nightly.timer
 ```
+
+---
+
+### Firmware directories (build server mount points)
+
+Firmware files are auto-detected by newest modification time — no manual
+path configuration needed as long as the nightly build drops files into the
+correct directories.
+
+| Device       | Mount path                  | File pattern              |
+|--------------|-----------------------------|---------------------------|
+| DM-NAX-4ZSA  | `/mnt/nightly/DM-NAX-4ZSA`  | `dm-nax-4zsa*.zip`        |
+| DM-NAX-8ZSA  | `/mnt/nightly/DM-NAX`       | `dm-nax-trunk-nightly*.puf` |
+| DM-NAX-4ZSP  | `/mnt/nightly/DM-NAX`       | `dm-nax-trunk-nightly*.puf` |
+
+Verify mounts are accessible before running:
+
+```bash
+ls /mnt/nightly/DM-NAX-4ZSA/*.zip   # should show latest 4ZSA zip
+ls /mnt/nightly/DM-NAX/*.puf        # should show latest 8ZSA/4ZSP puf
+```
+
+---
 
 ### Viewing results on the build server
 
@@ -443,17 +569,6 @@ http://<build-server-hostname>/
 Raw result directories are at `/opt/dmnax-test-suite/results/`.
 Results older than `results_retention_days` (default: 30 days, set in
 `test_manifest.yaml` under `defaults`) are automatically purged.
-
-### First-time server setup
-
-```bash
-# Run as root on a fresh Ubuntu 22.04/24.04 server
-bash /opt/dmnax-test-suite/deploy/setup_server.sh
-```
-
-This script: installs system packages, creates the `dmnax-test` service user,
-clones the repository, creates a Python venv, installs dependencies, installs
-and enables the systemd units, and configures nginx as a reverse proxy.
 
 ---
 
