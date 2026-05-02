@@ -140,10 +140,23 @@ zone_profiles:
 
 # Firmware upgrade settings
 firmware:
+  # Default firmware_dir used when a device does not define its own.
+  # On the build server the nightly drop dirs are mounted under /mnt/nightly/.
+  # On the dev machine update this to your local path.
   firmware_dir: "/home/builduser/Linux_jstr1000/nightly_testing"
   remote_dir: "firmware"          # remote directory on device for SFTP upload
   # firmware_file: ""             # explicit path override (auto-detected if empty)
   # method_override: ""           # force "imgupd" or "puf" regardless of model
+
+  # Per-device firmware directories (override firmware_dir above per model).
+  # Build server mount points:
+  #   DM-NAX-4ZSA  →  /mnt/nightly/DM-NAX-4ZSA   (.zip files)
+  #   DM-NAX-8ZSA  →  /mnt/nightly/DM-NAX         (.puf files)
+  #   DM-NAX-4ZSP  →  /mnt/nightly/DM-NAX         (.puf files)
+  firmware_dirs:
+    DM-NAX-4ZSA: "/mnt/nightly/DM-NAX-4ZSA"
+    DM-NAX-8ZSA: "/mnt/nightly/DM-NAX"
+    DM-NAX-4ZSP: "/mnt/nightly/DM-NAX"
 
 # Test execution settings
 test_settings:

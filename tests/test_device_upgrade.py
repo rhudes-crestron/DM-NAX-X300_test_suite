@@ -68,10 +68,11 @@ def upgrade_cfg(config, device_cfg, device_name, request):
     model = device_cfg["model"]
     fw_cfg = config.get("firmware", {})
 
-    # Firmware directory — explicit config or default to nightly_testing/
+    # Firmware directory — per-device override > global firmware_dir > suite parent
     suite_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     default_fw_dir = os.path.abspath(os.path.join(suite_dir, ".."))
-    firmware_dir = fw_cfg.get("firmware_dir", default_fw_dir)
+    per_device_dirs = fw_cfg.get("firmware_dirs", {})
+    firmware_dir = per_device_dirs.get(device_name) or fw_cfg.get("firmware_dir", default_fw_dir)
 
     # Method auto-detected from model, overridable in config
     method = {"4ZSA": "imgupd", "4ZSP": "puf", "8ZSA": "puf"}.get(model, "imgupd")
