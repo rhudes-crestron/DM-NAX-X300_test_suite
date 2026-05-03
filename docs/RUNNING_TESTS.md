@@ -471,7 +471,17 @@ sudo chown -R builduser:builduser /opt/dmnax-test-suite
 
 # Pull latest changes
 git pull origin master
+
+# Restart the dashboard to load any new routes/templates
+sudo systemctl restart dmnax-dashboard.service
+
+# Verify dashboard is running
+sudo systemctl status dmnax-dashboard.service
 ```
+
+> **Note:** The nightly timer (`dmnax-nightly.service`) picks up code changes automatically
+> at its next 01:00 run — no restart needed for test changes.
+> Only the dashboard needs restarting when `dashboard.py` or templates change.
 
 ---
 
