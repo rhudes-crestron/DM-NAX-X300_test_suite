@@ -228,12 +228,20 @@ def run_device_tests(target_name, target_cfg, devices_cfg, timestamp, skip_upgra
         ] + dsp_tests
 
         with open(run_dir / "console.log", "w") as log_f:
-            proc = subprocess.run(
-                dsp_cmd, stdout=log_f, stderr=subprocess.STDOUT,
-                timeout=timeout_s, cwd=str(SUITE_DIR),
-            )
-        results["test_exit"] = proc.returncode
-        logger.info("[%s] Tests: exit=%d", target_name, proc.returncode)
+            try:
+                proc = subprocess.run(
+                    dsp_cmd, stdout=log_f, stderr=subprocess.STDOUT,
+                    timeout=timeout_s, cwd=str(SUITE_DIR),
+                )
+                results["test_exit"] = proc.returncode
+                logger.info("[%s] Tests: exit=%d", target_name, proc.returncode)
+            except subprocess.TimeoutExpired:
+                logger.error(
+                    "[%s] Tests timed out after %ds — reading partial results",
+                    target_name, timeout_s,
+                )
+                results["test_exit"] = -1
+                results["timed_out"] = True
     else:
         results["test_exit"] = 0
 
