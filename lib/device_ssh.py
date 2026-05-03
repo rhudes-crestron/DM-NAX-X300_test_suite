@@ -72,6 +72,21 @@ class DeviceSSH:
                 logger.debug("CMD [%s]: %s", self.ip, command)
                 log_event(trace_source, f"exec timeout={timeout}s cmd={command}")
                 _, stdout, stderr = self._client.exec_command(command, timeout=timeout)
+
+                # stdout.read() blocks indefinitely if the SSH channel never
+                # sends EOF (seen with 'ampctrl FaultSt' on 4ZSP/8ZSA fw42).
+                # Use the channel's exit-status event with an explicit deadline
+                # instead of relying on the paramiko exec_command timeout alone.
+                stdout.channel.settimeout(timeout)
+                if not stdout.channel.exit_status_ready():
+                    import select as _select
+                    ready, _, _ = _select.select([stdout.channel], [], [], timeout)
+                    if not ready:
+                        stdout.channel.close()
+                        raise TimeoutError(
+                            f"SSH command timed out after {timeout}s: {command!r}"
+                        )
+
                 output = stdout.read().decode("utf-8", errors="replace")
                 err = stderr.read().decode("utf-8", errors="replace")
                 out_lines = [ln for ln in output.splitlines() if ln.strip()]
