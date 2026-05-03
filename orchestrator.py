@@ -268,7 +268,15 @@ def run_device_tests(target_name, target_cfg, devices_cfg, timestamp, skip_upgra
         results["skipped"] = summary.get("skipped", 0)
         # pytest-json-report stores duration at root level, not inside summary
         results["duration"] = round(data.get("duration", 0) or summary.get("duration", 0), 1)
-        results["status"] = "passed" if results["failed"] == 0 else "failed"
+        # Mark as failed if any tests failed OR if no tests actually ran
+        if results["failed"] > 0:
+            results["status"] = "failed"
+        elif results["passed"] == 0 and results["total"] > 0:
+            results["status"] = "failed"
+        elif results["total"] == 0:
+            results["status"] = "error"
+        else:
+            results["status"] = "passed"
     except FileNotFoundError:
         results["status"] = "error"
         results["message"] = "No results JSON produced"
@@ -357,7 +365,7 @@ def write_combined_summary(all_results, timestamp):
         "targets": all_results,
         "total_devices": len(all_results),
         "devices_passed": sum(1 for r in all_results if r.get("status") == "passed"),
-        "devices_failed": sum(1 for r in all_results if r.get("status") == "failed"),
+        "devices_failed": sum(1 for r in all_results if r.get("status") in ("failed", "error")),
         "total_tests": sum(r.get("total", 0) for r in all_results),
         "total_passed": sum(r.get("passed", 0) for r in all_results),
         "total_failed": sum(r.get("failed", 0) for r in all_results),
@@ -473,7 +481,22 @@ def main():
                 })
 
     # Write combined summary
-    summary = write_combined_summary(all_results, timestamp)
+    try:
+        summary = write_combined_summary(all_results, timestamp)
+    except Exception as exc:
+        logger.error("Failed to write combined summary: %s", exc)
+        # Build a minimal summary so email still works
+        summary = {
+            "timestamp": timestamp,
+            "targets": all_results,
+            "total_devices": len(all_results),
+            "devices_passed": sum(1 for r in all_results if r.get("status") == "passed"),
+            "devices_failed": sum(1 for r in all_results if r.get("status") in ("failed", "error")),
+            "total_tests": 0,
+            "total_passed": 0,
+            "total_failed": 0,
+            "total_duration": 0,
+        }
 
     # Generate per-run index page (links to each device's report.html)
     try:
