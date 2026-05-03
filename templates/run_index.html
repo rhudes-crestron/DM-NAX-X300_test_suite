@@ -94,7 +94,7 @@
     <div class="label">Tests Failed</div>
   </div>
   <div class="card">
-    <div class="value">{{ total_duration }}s</div>
+    <div class="value">{{ total_duration | fmt_duration }}</div>
     <div class="label">Total Duration</div>
   </div>
 </div>
@@ -145,7 +145,7 @@
           <span style="color:{% if rate >= 90 %}var(--green){% elif rate >= 70 %}var(--yellow){% else %}var(--red){% endif %}; font-size:0.9em;">{{ rate }}%</span>
         </div>
       </td>
-      <td>{{ dev.duration | default(0) | round(1) }}s</td>
+      <td>{{ dev.duration | default(0) | fmt_duration }}</td>
       <td>
         {% if dev.report_html %}
           <a class="report-link" href="{{ dev.report_link }}">View Report &rarr;</a>

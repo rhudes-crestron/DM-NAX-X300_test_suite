@@ -12,6 +12,19 @@ from email.mime.text import MIMEText
 logger = logging.getLogger(__name__)
 
 
+def _fmt_duration(seconds):
+    seconds = int(seconds or 0)
+    if seconds >= 3600:
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        return f"{h}h {m}m" if m else f"{h}h"
+    if seconds >= 60:
+        m = seconds // 60
+        s = seconds % 60
+        return f"{m}m {s}s" if s else f"{m}m"
+    return f"{seconds}s"
+
+
 def _build_html_body(summary, index_url):
     """Build a compact HTML email body with the run summary table."""
     timestamp = summary.get("timestamp", "")
@@ -45,7 +58,7 @@ def _build_html_body(summary, index_url):
         failed = t.get("failed", 0)
         total = t.get("total", 0)
         rate = round(passed / total * 100, 1) if total > 0 else 0
-        dur = round(t.get("duration", 0), 1)
+        dur = _fmt_duration(t.get("duration", 0))
 
         if status == "passed":
             s_badge = f'<span style="color:#3fb950;font-weight:600">PASS</span>'
@@ -62,7 +75,7 @@ def _build_html_body(summary, index_url):
           <td style="padding:8px 12px;border-bottom:1px solid #30363d;text-align:center;color:{'#f85149' if failed > 0 else '#484f58'}">{failed}</td>
           <td style="padding:8px 12px;border-bottom:1px solid #30363d;text-align:center">{total}</td>
           <td style="padding:8px 12px;border-bottom:1px solid #30363d;text-align:center">{rate}%</td>
-          <td style="padding:8px 12px;border-bottom:1px solid #30363d;text-align:center">{dur}s</td>
+          <td style="padding:8px 12px;border-bottom:1px solid #30363d;text-align:center">{dur}</td>
         </tr>"""
 
     return f"""
@@ -76,7 +89,7 @@ def _build_html_body(summary, index_url):
       </div>
 
       <div style="text-align:center;padding:10px 0;font-size:0.95em;color:#8b949e">
-        {total_devices} devices &bull; {total_tests} tests &bull; {total_passed} passed &bull; {total_failed} failed &bull; {total_duration}s
+        {total_devices} devices &bull; {total_tests} tests &bull; {total_passed} passed &bull; {total_failed} failed &bull; {_fmt_duration(total_duration)}
       </div>
 
       <table style="width:100%;border-collapse:collapse;background:#161b22;border:1px solid #30363d;border-radius:6px">

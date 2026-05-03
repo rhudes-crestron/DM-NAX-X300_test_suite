@@ -23,6 +23,19 @@ def create_app():
     app = Flask(__name__, template_folder=TEMPLATE_DIR,
                 static_folder=os.path.join(SUITE_DIR, "static"))
 
+    @app.template_filter("fmt_duration")
+    def fmt_duration(seconds):
+        seconds = int(seconds or 0)
+        if seconds >= 3600:
+            h = seconds // 3600
+            m = (seconds % 3600) // 60
+            return f"{h}h {m}m" if m else f"{h}h"
+        if seconds >= 60:
+            m = seconds // 60
+            s = seconds % 60
+            return f"{m}m {s}s" if s else f"{m}m"
+        return f"{seconds}s"
+
     def _load_config():
         with open(CONFIG_PATH) as f:
             return yaml.safe_load(f)

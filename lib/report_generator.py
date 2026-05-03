@@ -14,6 +14,23 @@ logger = logging.getLogger(__name__)
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "templates")
 
+
+def _fmt_duration(seconds):
+    """Format a duration in seconds as a human-readable string.
+
+    Examples: 45s, 7m 30s, 1h 23m
+    """
+    seconds = int(seconds or 0)
+    if seconds >= 3600:
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        return f"{h}h {m}m" if m else f"{h}h"
+    if seconds >= 60:
+        m = seconds // 60
+        s = seconds % 60
+        return f"{m}m {s}s" if s else f"{m}m"
+    return f"{seconds}s"
+
 # ── Per-category signal-path diagrams ──
 # Each entry is an ordered list of (label, css_class) tuples showing the
 # actual test flow.  css_class values:
@@ -395,6 +412,7 @@ def generate_report(results_json_path, output_html_path, device_info=None):
     }
 
     env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=True)
+    env.filters["fmt_duration"] = _fmt_duration
     template = env.get_template("report.html")
     html = template.render(**context)
 
@@ -440,6 +458,7 @@ def generate_run_index(summary, output_dir):
     }
 
     env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=True)
+    env.filters["fmt_duration"] = _fmt_duration
     template = env.get_template("run_index.html")
     html = template.render(**context)
 

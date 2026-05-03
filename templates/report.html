@@ -501,7 +501,7 @@
       <span class="log-btn" style="border-color:#f59e0b;color:#f59e0b;margin-left:4px"
             onclick="toggleLog('{{ reset_id }}')">&#x21BA; reset</span>
       {% endif %}
-      <div class="test-duration">{{ "%.2f" | format(test.get('duration', 0)) }}s</div>
+      <div class="test-duration">{{ test.get('duration', 0) | fmt_duration }}</div>
       <div class="test-status {{ test.outcome }}">{{ test.outcome }}</div>
     </div>
     {% if has_any_log %}

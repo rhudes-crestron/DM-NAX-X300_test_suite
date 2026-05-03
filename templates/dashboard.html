@@ -195,7 +195,7 @@
       <td style="color:var(--green)">{{ s.total_passed }}</td>
       <td style="color:{% if s.total_failed > 0 %}var(--red){% else %}var(--text3){% endif %}">{{ s.total_failed }}</td>
       <td>{{ s.total_tests }}</td>
-      <td>{{ s.total_duration }}s</td>
+      <td>{{ s.total_duration | fmt_duration }}</td>
       <td><a href="/run/{{ s.timestamp }}">View All &rarr;</a></td>
     </tr>
     {% endfor %}
@@ -234,7 +234,7 @@
           {{ run.pass_rate }}%
         </span>
       </td>
-      <td>{{ run.duration }}s</td>
+      <td>{{ run.duration | fmt_duration }}</td>
       <td>
         {% if run.failed == 0 %}
           <span class="badge pass">PASS</span>
