@@ -403,3 +403,49 @@ def generate_report(results_json_path, output_html_path, device_info=None):
 
     logger.info("Report generated: %s", output_html_path)
     return output_html_path
+
+
+def generate_run_index(summary, output_dir):
+    """Generate a per-run index.html that links to each device's report.
+
+    Args:
+        summary: dict from run_summary.json (timestamp, targets[], totals)
+        output_dir: directory to write index.html into (results/{timestamp}/)
+
+    Returns:
+        str: path to the generated index.html
+    """
+    # Add relative report links for each device target
+    for target in summary.get("targets", []):
+        report_html = target.get("report_html", "")
+        if report_html and os.path.isfile(report_html):
+            # Use the Flask /report/<run_id> route so links work when served
+            # by the dashboard.  run_id is the basename of the device results dir.
+            run_id = os.path.basename(os.path.dirname(report_html))
+            target["report_link"] = f"/report/{run_id}"
+        else:
+            target["report_link"] = ""
+
+    context = {
+        "timestamp": summary.get("timestamp", ""),
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "targets": summary.get("targets", []),
+        "total_devices": summary.get("total_devices", 0),
+        "devices_passed": summary.get("devices_passed", 0),
+        "devices_failed": summary.get("devices_failed", 0),
+        "total_tests": summary.get("total_tests", 0),
+        "total_passed": summary.get("total_passed", 0),
+        "total_failed": summary.get("total_failed", 0),
+        "total_duration": summary.get("total_duration", 0),
+    }
+
+    env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=True)
+    template = env.get_template("run_index.html")
+    html = template.render(**context)
+
+    output_path = os.path.join(output_dir, "index.html")
+    with open(output_path, "w") as f:
+        f.write(html)
+
+    logger.info("Run index generated: %s", output_path)
+    return output_path

@@ -258,7 +258,8 @@ def run_device_tests(target_name, target_cfg, devices_cfg, timestamp, skip_upgra
         results["passed"] = summary.get("passed", 0)
         results["failed"] = summary.get("failed", 0)
         results["skipped"] = summary.get("skipped", 0)
-        results["duration"] = round(summary.get("duration", 0), 1)
+        # pytest-json-report stores duration at root level, not inside summary
+        results["duration"] = round(data.get("duration", 0) or summary.get("duration", 0), 1)
         results["status"] = "passed" if results["failed"] == 0 else "failed"
     except FileNotFoundError:
         results["status"] = "error"
@@ -465,6 +466,26 @@ def main():
 
     # Write combined summary
     summary = write_combined_summary(all_results, timestamp)
+
+    # Generate per-run index page (links to each device's report.html)
+    try:
+        from lib.report_generator import generate_run_index
+        summary_dir = str(RESULTS_DIR / timestamp)
+        index_path = generate_run_index(summary, summary_dir)
+        logger.info("Run index: %s", index_path)
+    except Exception as exc:
+        logger.error("Failed to generate run index: %s", exc)
+
+    # Send email notification
+    try:
+        from lib.email_notifier import send_run_notification
+        email_cfg = manifest.get("email", {})
+        if email_cfg.get("enabled", False):
+            base_url = email_cfg.get("base_url", "http://nj6v-docker-04")
+            index_url = f"{base_url}/run/{timestamp}"
+            send_run_notification(summary, index_url, email_cfg)
+    except Exception as exc:
+        logger.error("Failed to send notification email: %s", exc)
 
     # Final report
     logger.info("")

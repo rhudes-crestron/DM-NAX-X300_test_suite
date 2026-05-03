@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DM-NAX Nightly Test Run — {{ timestamp }}</title>
+<style>
+  :root {
+    --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
+    --border: #30363d; --text: #c9d1d9; --text2: #8b949e; --text3: #484f58;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922; --blue: #58a6ff;
+    --green-bg: #0d2818; --red-bg: #2d1014; --yellow-bg: #2b2000;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; }
+
+  .header { text-align: center; margin-bottom: 32px; }
+  .header h1 { font-size: 1.6em; font-weight: 600; margin-bottom: 4px; }
+  .header .timestamp { color: var(--text2); font-size: 0.9em; }
+  .header .overall-badge { display: inline-block; margin-top: 12px; padding: 6px 24px; border-radius: 20px; font-weight: 600; font-size: 1.1em; letter-spacing: 0.5px; }
+  .badge-pass { background: var(--green-bg); color: var(--green); border: 1px solid var(--green); }
+  .badge-fail { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
+  .badge-mixed { background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow); }
+
+  .summary-cards { display: flex; gap: 16px; justify-content: center; margin-bottom: 32px; flex-wrap: wrap; }
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 16px 24px; min-width: 140px; text-align: center; }
+  .card .value { font-size: 1.8em; font-weight: 700; }
+  .card .label { color: var(--text2); font-size: 0.8em; margin-top: 4px; }
+
+  .devices-table { width: 100%; max-width: 1100px; margin: 0 auto; border-collapse: collapse; }
+  .devices-table th { background: var(--bg3); color: var(--text2); font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+  .devices-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .devices-table tr:hover { background: var(--bg2); }
+
+  .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .dot-pass { background: var(--green); }
+  .dot-fail { background: var(--red); }
+  .dot-error { background: var(--yellow); }
+
+  .badge { padding: 3px 10px; border-radius: 12px; font-size: 0.75em; font-weight: 600; letter-spacing: 0.3px; }
+  .pass { background: var(--green-bg); color: var(--green); }
+  .fail { background: var(--red-bg); color: var(--red); }
+  .mixed { background: var(--yellow-bg); color: var(--yellow); }
+  .error { background: var(--yellow-bg); color: var(--yellow); }
+
+  .report-link { color: var(--blue); text-decoration: none; font-weight: 500; }
+  .report-link:hover { text-decoration: underline; }
+
+  .footer { text-align: center; color: var(--text3); font-size: 0.8em; margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border); }
+
+  .progress-bar { width: 100%; height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>DM-NAX Nightly Test Run</h1>
+  <div class="timestamp">{{ timestamp }}</div>
+  <div>
+    {% if devices_failed == 0 %}
+      <span class="overall-badge badge-pass">ALL PASSED</span>
+    {% elif devices_passed > 0 %}
+      <span class="overall-badge badge-mixed">MIXED</span>
+    {% else %}
+      <span class="overall-badge badge-fail">ALL FAILED</span>
+    {% endif %}
+  </div>
+</div>
+
+<div class="summary-cards">
+  <div class="card">
+    <div class="value">{{ total_devices }}</div>
+    <div class="label">Devices</div>
+  </div>
+  <div class="card">
+    <div class="value" style="color:var(--green)">{{ devices_passed }}</div>
+    <div class="label">Passed</div>
+  </div>
+  <div class="card">
+    <div class="value" style="color:{% if devices_failed > 0 %}var(--red){% else %}var(--text3){% endif %}">{{ devices_failed }}</div>
+    <div class="label">Failed</div>
+  </div>
+  <div class="card">
+    <div class="value">{{ total_tests }}</div>
+    <div class="label">Total Tests</div>
+  </div>
+  <div class="card">
+    <div class="value" style="color:var(--green)">{{ total_passed }}</div>
+    <div class="label">Tests Passed</div>
+  </div>
+  <div class="card">
+    <div class="value" style="color:{% if total_failed > 0 %}var(--red){% else %}var(--text3){% endif %}">{{ total_failed }}</div>
+    <div class="label">Tests Failed</div>
+  </div>
+  <div class="card">
+    <div class="value">{{ total_duration }}s</div>
+    <div class="label">Total Duration</div>
+  </div>
+</div>
+
+<table class="devices-table">
+  <thead>
+    <tr>
+      <th>Device</th>
+      <th>Model</th>
+      <th>Status</th>
+      <th>Passed</th>
+      <th>Failed</th>
+      <th>Skipped</th>
+      <th>Total</th>
+      <th>Pass Rate</th>
+      <th>Duration</th>
+      <th>Report</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for dev in targets %}
+    <tr>
+      <td>
+        {% if dev.status == 'passed' %}<span class="status-dot dot-pass"></span>
+        {% elif dev.status == 'failed' %}<span class="status-dot dot-fail"></span>
+        {% else %}<span class="status-dot dot-error"></span>{% endif %}
+        {{ dev.target }}
+      </td>
+      <td>{{ dev.device | default('—') }}</td>
+      <td>
+        {% if dev.status == 'passed' %}<span class="badge pass">PASS</span>
+        {% elif dev.status == 'failed' %}<span class="badge fail">FAIL</span>
+        {% elif dev.status == 'error' %}<span class="badge error">ERROR</span>
+        {% else %}<span class="badge mixed">{{ dev.status | upper }}</span>{% endif %}
+      </td>
+      <td style="color:var(--green)">{{ dev.passed | default(0) }}</td>
+      <td style="color:{% if dev.failed | default(0) > 0 %}var(--red){% else %}var(--text3){% endif %}">{{ dev.failed | default(0) }}</td>
+      <td style="color:var(--text3)">{{ dev.skipped | default(0) }}</td>
+      <td>{{ dev.total | default(0) }}</td>
+      <td>
+        {% set total = dev.total | default(0) %}
+        {% set passed = dev.passed | default(0) %}
+        {% set rate = (passed / total * 100) | round(1) if total > 0 else 0 %}
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div class="progress-bar" style="width:80px;">
+            <div class="progress-fill" style="width:{{ rate }}%; background:{% if rate >= 90 %}var(--green){% elif rate >= 70 %}var(--yellow){% else %}var(--red){% endif %};"></div>
+          </div>
+          <span style="color:{% if rate >= 90 %}var(--green){% elif rate >= 70 %}var(--yellow){% else %}var(--red){% endif %}; font-size:0.9em;">{{ rate }}%</span>
+        </div>
+      </td>
+      <td>{{ dev.duration | default(0) | round(1) }}s</td>
+      <td>
+        {% if dev.report_html %}
+          <a class="report-link" href="{{ dev.report_link }}">View Report &rarr;</a>
+        {% else %}
+          <span style="color:var(--text3)">—</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="footer">
+  DM-NAX DSP Test Suite &bull; Crestron Electronics &bull; Generated {{ generated_at }}
+</div>
+
+</body>
+</html>

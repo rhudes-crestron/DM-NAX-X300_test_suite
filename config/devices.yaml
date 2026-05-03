@@ -1,33 +1,26 @@
 # DM-NAX DSP Test Suite Configuration
-# Device profiles - add new devices here
-devices:
-  DM-NAX-4ZSA:
-    ip: "192.168.1.157"
-    username: "admin"
-    password: "admin123"
-    model: "4ZSA"
+#
+# ═══════════════════════════════════════════════════════════════
+#  Model templates — shared config inherited by device instances.
+#  To add a new device:
+#    1. Pick the matching template (&nax_4zone or &nax_8zone)
+#    2. Add a new entry under 'devices:' with  <<: *nax_Xzone
+#    3. Override only device-specific keys (ip, model, password, physical_inputs, etc.)
+# ═══════════════════════════════════════════════════════════════
+
+model_templates:
+  # ── 4-zone platform (fw21, 4 amp pairs, 4 streaming inputs) ──
+  nax_4zone: &nax_4zone
     zones: 4
     amp_outputs: ["A1L","A1R","A2L","A2R","A3L","A3R","A4L","A4R"]
     line_outputs: ["L1L","L1R"]
     network_outputs: ["N1L","N1R","N2L","N2R","N3L","N3R","N4L","N4R"]
-    physical_inputs:
-      S1: { channels: ["S1L","S1R"], index: [0,1], type: "stream" }
-      T1: { channels: ["T1L","T1R"], index: [2,3], type: "stream" }
-      L1: { channels: ["L1L","L1R"], index: [4,5], type: "line", has_adc: true }
-      L2: { channels: ["L2L","L2R"], index: [6,7], type: "line", has_adc: true }
-    signal_generator: { channel: 28, name: "SIG" }
-    mixer_outputs: 10
     dsp_fw_version: 21
     has_speaker_protect: false
     ssh_port: 22
-    # Input01 (T1/TOSLINK) is physically silent without a cable connected.
-    # Setting zones to Input01 gives CresNext a valid source assignment while
-    # keeping the internal tone generator (ch28) as the sole audio source.
     dsp_tone_input: "Input01"
     streaming:
       base_port: 60001
-      # Zone → streaming input → player port → test tone frequency
-      # Input05-08 = MediaStream1-4 on 4ZSA (ports 60001-60004)
       zones:
         1: { input: "Input05", port: 60001, tone_hz: 100 }
         2: { input: "Input06", port: 60002, tone_hz: 200 }
@@ -35,48 +28,18 @@ devices:
         4: { input: "Input08", port: 60004, tone_hz: 800 }
       audio_server_port: 8088
 
-  DM-NAX-8ZSA:
-    ip: "192.168.1.178"
-    username: "admin"
-    password: "crestron"
-    model: "8ZSA"
+  # ── 8-zone platform (fw42, 8 amp pairs, 8 streaming inputs) ──
+  nax_8zone: &nax_8zone
     zones: 8
     amp_outputs: ["A1L","A1R","A2L","A2R","A3L","A3R","A4L","A4R","A5L","A5R","A6L","A6R","A7L","A7R","A8L","A8R"]
     line_outputs: ["L1L","L1R"]
     network_outputs: ["N1L","N1R","N2L","N2R","N3L","N3R","N4L","N4R"]
-    physical_inputs:
-      S1: { channels: ["S1L","S1R"], index: [0,1], type: "stream" }
-      T1: { channels: ["T1L","T1R"], index: [2,3], type: "stream" }
-      L1: { channels: ["L1L","L1R"], index: [4,5], type: "line", has_adc: true }
-      L2: { channels: ["L2L","L2R"], index: [6,7], type: "line", has_adc: true }
-    # fw42 on 8ZSA exposes tone control on physical channels (0-7).
-    # Use ch0 (S1L/Input01) for DSP tone tests.
-    signal_generator: { channel: 0, name: "S1L" }
-    mixer_outputs: 8
     dsp_fw_version: 42
     has_speaker_protect: true
     ssh_port: 22
-    # AvMatrixRouting input that carries the internal DSP bus (tone gen / mixer).
-    # DSP tone-generator tests route zones here so signal reaches amp outputs.
-    # Input01 (S1/SPDIF) is physically silent when no cable is connected,
-    # letting the internal signal generator be the sole audio source.
     dsp_tone_input: "Input01"
-    engineering_debug:
-      auto_enable_for_streaming: true
-      # Zip source on Linux build server is resolved from mounted path:
-      # /mnt/nightly/AM335x_dinap3/eng_dbg
-      # (UNC fallback is used only if mount is unavailable.)
-      zip_file: ""
-      search_roots: []
-      # Optional SMB credentials for the UNC share (if anonymous access is denied).
-      smb_username: "builduser"
-      smb_password: "password"
-      smb_domain: ""
-      set_current_datetime: false
-      remote_zip_path: "firmware/engineering_debug.zip"
     streaming:
       base_port: 60001
-      # Input05-12 = MediaStream1-8 on 8ZSA (ports 60001-60008)
       zones:
         1: { input: "Input05", port: 60001, tone_hz: 100 }
         2: { input: "Input06", port: 60002, tone_hz: 200 }
@@ -88,15 +51,54 @@ devices:
         8: { input: "Input12", port: 60008, tone_hz: 12000 }
       audio_server_port: 8088
 
+
+# ═══════════════════════════════════════════════════════════════
+#  Device instances — one per physical DUT
+# ═══════════════════════════════════════════════════════════════
+devices:
+  DM-NAX-4ZSA:
+    <<: *nax_4zone
+    ip: "dm-nax-4zsa-50-c4426800017c"
+    username: "admin"
+    password: "admin123"
+    model: "4ZSA"
+    physical_inputs:
+      S1: { channels: ["S1L","S1R"], index: [0,1], type: "stream" }
+      T1: { channels: ["T1L","T1R"], index: [2,3], type: "stream" }
+      L1: { channels: ["L1L","L1R"], index: [4,5], type: "line", has_adc: true }
+      L2: { channels: ["L2L","L2R"], index: [6,7], type: "line", has_adc: true }
+    signal_generator: { channel: 28, name: "SIG" }
+    mixer_outputs: 10
+
+  DM-NAX-8ZSA:
+    <<: *nax_8zone
+    ip: "192.168.1.178"
+    username: "admin"
+    password: "crestron"
+    model: "8ZSA"
+    physical_inputs:
+      S1: { channels: ["S1L","S1R"], index: [0,1], type: "stream" }
+      T1: { channels: ["T1L","T1R"], index: [2,3], type: "stream" }
+      L1: { channels: ["L1L","L1R"], index: [4,5], type: "line", has_adc: true }
+      L2: { channels: ["L2L","L2R"], index: [6,7], type: "line", has_adc: true }
+    signal_generator: { channel: 0, name: "S1L" }
+    mixer_outputs: 8
+    engineering_debug:
+      auto_enable_for_streaming: true
+      zip_file: ""
+      search_roots: []
+      smb_username: "builduser"
+      smb_password: "password"
+      smb_domain: ""
+      set_current_datetime: false
+      remote_zip_path: "firmware/engineering_debug.zip"
+
   DM-NAX-4ZSP:
+    <<: *nax_8zone
     ip: "dm-nax-4zsp-00107fca06ff"
     username: "admin"
     password: "crestron"
     model: "4ZSP"
-    zones: 8
-    amp_outputs: ["A1L","A1R","A2L","A2R","A3L","A3R","A4L","A4R","A5L","A5R","A6L","A6R","A7L","A7R","A8L","A8R"]
-    line_outputs: ["L1L","L1R"]
-    network_outputs: ["N1L","N1R","N2L","N2R","N3L","N3R","N4L","N4R"]
     physical_inputs:
       # fw42 DSP: two 8-channel blocks (ch 0-7 = DSP0, ch 8-15 = DSP1)
       T1: { channels: ["T1L","T1R"], index: [0,1], type: "stream" }
@@ -107,27 +109,23 @@ devices:
       S2: { channels: ["S2L","S2R"], index: [10,11], type: "stream" }
       A3: { channels: ["A3L","A3R"], index: [12,13], type: "line", has_adc: true }
       A4: { channels: ["A4L","A4R"], index: [14,15], type: "line", has_adc: true }
-    signal_generator: { channel: 0, name: "T1L" }  # fw42: no dedicated SG ch28, use input ch 0
+    signal_generator: { channel: 0, name: "T1L" }
     mixer_outputs: 16
-    dsp_fw_version: 42
-    has_speaker_protect: true
-    ssh_port: 22
-    # AvMatrixRouting input for tone-gen tests.  On 4ZSP the signal generator
-    # IS Input01 (T1L, ch0) — routing zones here lets the tone flow through.
-    dsp_tone_input: "Input01"
-    streaming:
-      base_port: 60001
-      # Input05-12 = MediaStream1-8 on 4ZSP (ports 60001-60008), same as 8ZSA
-      zones:
-        1: { input: "Input05", port: 60001, tone_hz: 100 }
-        2: { input: "Input06", port: 60002, tone_hz: 200 }
-        3: { input: "Input07", port: 60003, tone_hz: 400 }
-        4: { input: "Input08", port: 60004, tone_hz: 800 }
-        5: { input: "Input09", port: 60005, tone_hz: 1500 }
-        6: { input: "Input10", port: 60006, tone_hz: 3000 }
-        7: { input: "Input11", port: 60007, tone_hz: 6000 }
-        8: { input: "Input12", port: 60008, tone_hz: 12000 }
-      audio_server_port: 8088
+
+  # ── To add a new device, copy this block: ──
+  # DM-NAX-NEW:
+  #   <<: *nax_8zone            # or *nax_4zone
+  #   ip: "10.x.x.x"
+  #   username: "admin"
+  #   password: "crestron"
+  #   model: "NEW"
+  #   physical_inputs:
+  #     S1: { channels: ["S1L","S1R"], index: [0,1], type: "stream" }
+  #     T1: { channels: ["T1L","T1R"], index: [2,3], type: "stream" }
+  #     L1: { channels: ["L1L","L1R"], index: [4,5], type: "line", has_adc: true }
+  #     L2: { channels: ["L2L","L2R"], index: [6,7], type: "line", has_adc: true }
+  #   signal_generator: { channel: 0, name: "S1L" }
+  #   mixer_outputs: 8
 
 # Zone selection profiles for runtime filtering.
 # full mode = all zones on the device.

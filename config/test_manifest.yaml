@@ -137,3 +137,14 @@ schedule:
     targets: ["DM-NAX-4ZSA", "DM-NAX-4ZSP", "DM-NAX-8ZSA"]
   on_demand:
     targets: []                   # filled at runtime via CLI
+
+# ── Email notification ────────────────────────────────────────
+# Sent after every nightly run with a link to the run index page.
+email:
+  enabled: true
+  smtp_host: "smtp.crestron.com"
+  smtp_port: 25
+  from_address: "dmnax-nightly@crestron.com"
+  base_url: "http://nj6v-docker-04"    # dashboard hostname for report links
+  recipients:
+    - "praghupathy@crestron.com"

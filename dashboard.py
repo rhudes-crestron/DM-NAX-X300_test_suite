@@ -76,6 +76,46 @@ def create_app():
 
         return runs
 
+    def _scan_run_summaries():
+        """Scan for per-run summary directories (run_summary.json)."""
+        summaries = []
+        if not os.path.isdir(RESULTS_DIR):
+            return summaries
+
+        for entry in sorted(os.listdir(RESULTS_DIR)):
+            summary_path = os.path.join(RESULTS_DIR, entry, "run_summary.json")
+            if not os.path.isfile(summary_path):
+                continue
+            try:
+                with open(summary_path) as f:
+                    data = json.load(f)
+                devices_failed = data.get("devices_failed", 0)
+                devices_passed = data.get("devices_passed", 0)
+                if devices_failed == 0:
+                    status = "pass"
+                elif devices_passed > 0:
+                    status = "mixed"
+                else:
+                    status = "fail"
+                device_names = ", ".join(t.get("target", "?") for t in data.get("targets", []))
+                summaries.append({
+                    "timestamp": data.get("timestamp", entry),
+                    "date": entry.replace("_", " "),
+                    "total_devices": data.get("total_devices", 0),
+                    "devices_passed": devices_passed,
+                    "devices_failed": devices_failed,
+                    "total_tests": data.get("total_tests", 0),
+                    "total_passed": data.get("total_passed", 0),
+                    "total_failed": data.get("total_failed", 0),
+                    "total_duration": data.get("total_duration", 0),
+                    "status": status,
+                    "device_names": device_names,
+                })
+            except Exception as exc:
+                logger.warning("Failed to parse %s: %s", summary_path, exc)
+
+        return summaries
+
     @app.route("/")
     def dashboard():
         runs = _scan_results()
@@ -104,6 +144,7 @@ def create_app():
             latest_device=latest_device,
             streak_count=streak_count,
             streak_status=streak_status,
+            run_summaries=_scan_run_summaries(),
         )
 
     @app.route("/history")
@@ -128,6 +169,15 @@ def create_app():
         if not os.path.isfile(report_path):
             abort(404)
         return send_file(report_path)
+
+    @app.route("/run/<timestamp>")
+    def view_run_index(timestamp):
+        """Serve the per-run index page (lists all devices with report links)."""
+        safe_ts = os.path.basename(timestamp)
+        index_path = os.path.join(RESULTS_DIR, safe_ts, "index.html")
+        if not os.path.isfile(index_path):
+            abort(404)
+        return send_file(index_path)
 
     @app.route("/api/results")
     def api_results():

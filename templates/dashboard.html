@@ -162,6 +162,48 @@
 </div>
 
 <!-- ═══════ HISTORY ═══════ -->
+{% if run_summaries %}
+<div class="section-title">Nightly Runs</div>
+<table class="history-table">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Devices</th>
+      <th>Status</th>
+      <th>Tests Passed</th>
+      <th>Tests Failed</th>
+      <th>Total Tests</th>
+      <th>Duration</th>
+      <th>Report</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in run_summaries | reverse %}
+    <tr>
+      <td>{{ s.date }}</td>
+      <td><span style="color:var(--text2);font-size:0.9em">{{ s.device_names }}</span></td>
+      <td>
+        {% if s.status == 'pass' %}
+          <span class="badge pass">ALL PASS</span>
+        {% elif s.status == 'mixed' %}
+          <span class="badge mixed">MIXED</span>
+        {% else %}
+          <span class="badge fail">ALL FAIL</span>
+        {% endif %}
+        <span style="color:var(--text3);font-size:0.8em;margin-left:6px">{{ s.devices_passed }}/{{ s.total_devices }} devices</span>
+      </td>
+      <td style="color:var(--green)">{{ s.total_passed }}</td>
+      <td style="color:{% if s.total_failed > 0 %}var(--red){% else %}var(--text3){% endif %}">{{ s.total_failed }}</td>
+      <td>{{ s.total_tests }}</td>
+      <td>{{ s.total_duration }}s</td>
+      <td><a href="/run/{{ s.timestamp }}">View All &rarr;</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<br>
+{% endif %}
+
 <div class="section-title">Run History</div>
 <table class="history-table">
   <thead>
