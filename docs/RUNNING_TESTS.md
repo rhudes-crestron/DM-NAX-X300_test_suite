@@ -441,6 +441,35 @@ sudo bash /opt/dmnax-test-suite/deploy/setup_server.sh
 creates the venv, installs Python dependencies (including `paramiko`), and
 installs the systemd units.
 
+> **Understanding the permission model**
+>
+> The nightly service runs as a dedicated **`dmnax-test`** system user (see
+> `User=dmnax-test` in `deploy/dmnax-nightly.service`).  This means the
+> `dmnax-test` process can **only read/write files that `dmnax-test` owns or
+> has group access to**.  In particular it must be able to write to:
+>
+> - `results/` — where test output and HTML reports are created each run
+> - `/var/log/dmnax-test/` — where stdout/stderr are appended
+>
+> `setup_server.sh` sets this up correctly by running
+> `chown -R dmnax-test:dmnax-test /opt/dmnax-test-suite`.  However, if you
+> later run `git pull` as a **different** user (e.g. `builduser`), Git will
+> create new files owned by that user, and `dmnax-test` will get
+> **Permission denied** errors at the next nightly run.
+>
+> **Two ways to prevent this:**
+>
+> 1. **Add `dmnax-test` to the `builduser` group** so it can write to files
+>    owned by `builduser:builduser`:
+>    ```bash
+>    sudo usermod -aG builduser dmnax-test
+>    sudo chmod -R g+w /opt/dmnax-test-suite/results
+>    ```
+>    (Requires a service restart or reboot for the new group to take effect.)
+>
+> 2. **Always fix ownership after pulling** (shown in the "Updating the suite"
+>    section below).
+
 If pip install fails silently or packages are missing after setup:
 
 ```bash
@@ -471,6 +500,13 @@ sudo chown -R builduser:builduser /opt/dmnax-test-suite
 
 # Pull latest changes
 git pull origin master
+
+# IMPORTANT: restore ownership so the dmnax-test service user can write
+# to results/ and other directories.  git pull creates files owned by
+# whoever runs it (e.g. builduser), but the nightly service runs as
+# dmnax-test — without this step you'll get Permission denied errors.
+sudo chown -R dmnax-test:dmnax-test /opt/dmnax-test-suite
+sudo chmod -R g+w /opt/dmnax-test-suite/results
 
 # Restart the dashboard to load any new routes/templates
 sudo systemctl restart dmnax-dashboard.service
@@ -543,6 +579,54 @@ sudo systemctl restart dmnax-dashboard.service
 # Edit /etc/systemd/system/dmnax-nightly.timer → OnCalendar=*-*-* 02:30:00
 sudo systemctl daemon-reload
 sudo systemctl restart dmnax-nightly.timer
+```
+
+---
+
+### Troubleshooting: Permission denied on nightly runs
+
+If the nightly log (`/var/log/dmnax-test/nightly.log`) shows errors like:
+
+```
+PermissionError: [Errno 13] Permission denied: '/opt/dmnax-test-suite/results/2026-05-03_01-00-00_DM-NAX-4ZSA'
+```
+
+it means the `dmnax-test` service user cannot write to `results/`.  This
+typically happens after someone runs `git pull` or creates files as `builduser`
+(or root) without restoring ownership.
+
+**Quick fix:**
+
+```bash
+# Fix ownership of the entire suite
+sudo chown -R dmnax-test:dmnax-test /opt/dmnax-test-suite
+
+# Ensure results/ is group-writable
+sudo chmod -R g+w /opt/dmnax-test-suite/results
+
+# Optionally, add dmnax-test to the builduser group so both users
+# can write (prevents the problem from recurring after git pull)
+sudo usermod -aG builduser dmnax-test
+
+# Restart the service for group membership to take effect
+sudo systemctl restart dmnax-nightly.timer
+```
+
+**How to verify permissions are correct:**
+
+```bash
+# Check who owns results/
+ls -ld /opt/dmnax-test-suite/results/
+# Should show: dmnax-test dmnax-test (or builduser:builduser if using group method)
+
+# Check dmnax-test group membership
+id dmnax-test
+# Should include 'builduser' if using the group method
+
+# Dry-run to confirm the service can start
+sudo -u dmnax-test mkdir -p /opt/dmnax-test-suite/results/permission-test && \
+    sudo -u dmnax-test rmdir /opt/dmnax-test-suite/results/permission-test && \
+    echo "OK — dmnax-test can write to results/"
 ```
 
 ---
