@@ -10,7 +10,7 @@ WorkingDirectory=/opt/dmnax-test-suite
 ExecStart=/opt/dmnax-test-suite/venv/bin/python3 orchestrator.py --schedule nightly
 StandardOutput=append:/var/log/dmnax-test/nightly.log
 StandardError=append:/var/log/dmnax-test/nightly.log
-TimeoutStartSec=7200
+TimeoutStartSec=50400
 
 [Install]
 WantedBy=multi-user.target

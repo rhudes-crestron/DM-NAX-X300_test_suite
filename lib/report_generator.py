@@ -342,7 +342,9 @@ def generate_report(results_json_path, output_html_path, device_info=None):
         # where module_name = nodeid file part converted to dotted module path.
         # e.g. tests/test_balance.py  →  tests.test_balance
         file_part = nodeid.split("::")[0]          # e.g. tests/test_balance.py
-        module_name = file_part.replace("/", ".").removesuffix(".py")
+        module_name = file_part.replace("/", ".")
+        if module_name.endswith(".py"):
+            module_name = module_name[:-3]
         reset_key = f"_module_reset_{module_name}"
         reset_text = trace_logs.get(reset_key, "")
         test["_reset_log"] = reset_text
