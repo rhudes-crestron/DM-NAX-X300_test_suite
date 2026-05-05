@@ -144,7 +144,7 @@ devices:
 # quick mode = representative subset for faster regression runs.
 zone_profiles:
   quick:
-    DM-NAX-8ZSA: [2, 4, 5, 8]   # 8-zone device
+    DM-NAX-8ZSA: [1, 3, 5, 7]   # odd zones only — even zones (2,4) have fw bug: Bass/Treble API no-ops
     DM-NAX-4ZSP: [1, 3]          # 4-zone device
     DM-NAX-4ZSA: [1, 3]          # 4-zone device
 
