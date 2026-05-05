@@ -56,8 +56,8 @@ class TestBalance:
     def _setup_zone(self, dsp, device_cfg, zone):
         """Route signal generator to the zone's L+R amp outputs.
 
-        fw42: tone on dsp.sig_ch (ch0=T1L=Input01), routed via AvMatrixRouting
-              through the zone chain which outputs to both L and R.
+        fw42: AvMatrixRouting activates zone-chain processing for Input01,
+              then mixer delivers the tone to both L and R outputs.
         fw21: tone on dsp.sig_ch (ch28=SIG), mixer routes to both L and R outputs.
         """
         left_idx, right_idx, _, _ = self._output_info(zone)
@@ -68,9 +68,8 @@ class TestBalance:
             if dsp.cn is not None:
                 dsp._set_tone_source_for_zone(zone)
             dsp.clear_all_sig_routes()
-        else:
-            dsp.set_mixer(dsp.sig_ch, left_idx, 0)
-            dsp.set_mixer(dsp.sig_ch, right_idx, 0)
+        dsp.set_mixer(dsp.sig_ch, left_idx, 0)
+        dsp.set_mixer(dsp.sig_ch, right_idx, 0)
 
     def _measure_lr(self, dsp, zone, settle_s):
         """Read L/R output levels for the zone from a single DSP snapshot."""

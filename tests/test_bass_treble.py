@@ -50,8 +50,8 @@ class TestBassTreble:
     def _setup_zone(self, dsp, device_cfg, zone, freq_hz):
         """Route signal tone to the zone's left amp output.
 
-        fw42: tone on dsp.sig_ch (ch0=T1L=Input01), routed via AvMatrixRouting
-              through the full zone chain. No dsp mix (it bypasses zone chain).
+        fw42: AvMatrixRouting activates zone-chain processing for Input01,
+              then mixer delivers the tone to the output measurement point.
         fw21: tone on dsp.sig_ch (ch28=SIG), routed via dsp mix into zone chain.
         """
         out_idx, _ = self._output_info(zone)
@@ -60,8 +60,7 @@ class TestBassTreble:
             if dsp.cn is not None:
                 dsp._set_tone_source_for_zone(zone)
             dsp.clear_all_sig_routes()
-        else:
-            dsp.set_mixer(dsp.sig_ch, out_idx, 0)
+        dsp.set_mixer(dsp.sig_ch, out_idx, 0)
 
     @pytest.mark.parametrize("zone", ALL_ZONES)
     @pytest.mark.parametrize("bass_value,direction", [

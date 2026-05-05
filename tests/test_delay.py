@@ -57,8 +57,7 @@ class TestDelay:
             if dsp.cn is not None:
                 dsp._set_tone_source_for_zone(zone)
             dsp.clear_all_sig_routes()
-        else:
-            dsp.set_mixer(dsp.sig_ch, out_idx, 0)
+        dsp.set_mixer(dsp.sig_ch, out_idx, 0)
 
     def _clear_zone_route(self, dsp, device_cfg, zone):
         """Clear signal route to a zone output so signal-detected can drop."""
@@ -160,8 +159,7 @@ class TestDelay:
                 if dsp.cn is not None:
                     dsp._set_tone_source_for_zone(zone)
                 dsp.clear_all_sig_routes()
-            else:
-                dsp.set_mixer(dsp.sig_ch, out_idx, 0)
+            dsp.set_mixer(dsp.sig_ch, out_idx, 0)
 
             t = self._time_to_signal_detected(dsp, zone, timeout_s=3.0, poll_s=0.01)
 

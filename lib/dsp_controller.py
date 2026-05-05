@@ -119,9 +119,10 @@ class DSPController:
     def route_sig_to_output(self, output_ch, gain_db=0):
         """Route signal generator to a specific output channel.
 
-        On fw42 devices, routes via CresNext AvMatrixRouting so the signal
-        passes through the full zone chain (EQ, Bass/Treble, Volume, etc.).
-        The DSP mixer is NOT used — on fw42 it bypasses the zone chain.
+        On fw42 devices, first sets CresNext AvMatrixRouting so the zone
+        chain (EQ, Bass/Treble, Volume, etc.) is active for the tone input,
+        then clears stale mixer routes and sets the one crosspoint needed
+        to deliver the tone to the output measurement point.
 
         On fw21 devices, routes via the DSP mixer crosspoint which feeds
         into the zone chain on that firmware architecture.
@@ -133,7 +134,6 @@ class DSPController:
                 if 1 <= zone <= max_zone:
                     self._set_tone_source_for_zone(zone)
             self.clear_all_sig_routes()
-            return  # fw42: signal reaches output via zone chain — no mixer bypass
         sig_ch = self.sig_ch_for_output(output_ch)
         return self.set_mixer(sig_ch, output_ch, gain_db)
 

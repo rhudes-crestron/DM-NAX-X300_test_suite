@@ -63,11 +63,12 @@ def _get_category_paths(model="4ZSA"):
     upgrade = p["upgrade"]
     fw42 = p.get("fw_ver", 21) >= 42
 
-    # On fw42 the DSP mixer bypasses the zone chain; signal must be routed
-    # through AvMatrixRouting to reach zone processing (EQ/Bass/Treble/etc.).
-    # On fw21 the mixer feeds INTO the zone chain, so dsp mix is correct.
+    # On fw42 the zone chain is only active when AvMatrixRouting assigns the
+    # input to the zone.  The mixer is still needed to deliver the digital
+    # tone signal to the output measurement point (output_db).
+    # On fw21 the mixer feeds INTO the zone chain, so dsp mix alone is correct.
     zone_route_step = (
-        ("REST: AvMatrixRouting Zone\u2192Input01", "process") if fw42
+        (f"REST: AvMatrixRouting + dsp mix {sg}\u2192out", "process") if fw42
         else (f"SSH: dsp mix {sg}\u2192{out1}", "process")
     )
 
