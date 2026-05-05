@@ -43,11 +43,14 @@ def _fmt_duration(seconds):
 # Device-specific parameters for diagrams
 _DEVICE_PARAMS = {
     "4ZSA": {"sg": "28", "sg_name": "SIG", "zones": 4, "out1": "A1L",
-             "stream_in": "Input05-08", "upgrade": "imgupd (.zip)", "fw": "fw21"},
-    "8ZSA": {"sg": "28", "sg_name": "SIG", "zones": 8, "out1": "A1L",
-             "stream_in": "Input05-12", "upgrade": "puf ALL (.puf)", "fw": "fw42"},
+             "stream_in": "Input05-08", "upgrade": "imgupd (.zip)", "fw": "fw21",
+             "fw_ver": 21},
+    "8ZSA": {"sg": "0",  "sg_name": "T1L", "zones": 8, "out1": "A1L",
+             "stream_in": "Input05-12", "upgrade": "puf ALL (.puf)", "fw": "fw42",
+             "fw_ver": 42},
     "4ZSP": {"sg": "0",  "sg_name": "T1L", "zones": 8, "out1": "A1L",
-             "stream_in": "Input05-12", "upgrade": "puf ALL (.puf)", "fw": "fw42"},
+             "stream_in": "Input05-12", "upgrade": "puf ALL (.puf)", "fw": "fw42",
+             "fw_ver": 42},
 }
 
 
@@ -58,6 +61,15 @@ def _get_category_paths(model="4ZSA"):
     out1 = p["out1"]
     stream_in = p["stream_in"]
     upgrade = p["upgrade"]
+    fw42 = p.get("fw_ver", 21) >= 42
+
+    # On fw42 the DSP mixer bypasses the zone chain; signal must be routed
+    # through AvMatrixRouting to reach zone processing (EQ/Bass/Treble/etc.).
+    # On fw21 the mixer feeds INTO the zone chain, so dsp mix is correct.
+    zone_route_step = (
+        ("REST: AvMatrixRouting Zone\u2192Input01", "process") if fw42
+        else (f"SSH: dsp mix {sg}\u2192{out1}", "process")
+    )
 
     return {
         "Device Upgrade": [
@@ -119,37 +131,38 @@ def _get_category_paths(model="4ZSA"):
             ("Assert level > floor", "verify"),
         ],
         "Volume": [
-            ("SSH: dsp tone + mix", "input"),
+            (f"SSH: dsp tone {sg}", "input"),
+            zone_route_step,
             ("REST: Volume=0-1000", "highlight"),
-            ("DSP processing", "process"),
             ("SSH: dsp \u2192 output_db", "measure"),
             ("Assert level \u0394", "verify"),
         ],
         "Balance": [
-            ("SSH: dsp tone + mix L+R", "input"),
+            (f"SSH: dsp tone {sg}", "input"),
+            zone_route_step,
             ("REST: Balance=\u00b1500", "highlight"),
-            ("DSP processing", "process"),
             ("SSH: dsp \u2192 L/R output_db", "measure"),
             ("Assert L/R diff", "verify"),
         ],
         "Bass Treble": [
             ("SSH: dsp tone 100Hz/10kHz", "input"),
-            (f"SSH: dsp mix \u2192 {out1}", "process"),
+            zone_route_step,
             ("REST: Bass/Treble=\u00b1120", "highlight"),
             ("SSH: dsp \u2192 output_db", "measure"),
             ("Assert level \u0394", "verify"),
         ],
         "Delay": [
-            ("SSH: dsp tone + mix", "input"),
+            (f"SSH: dsp tone {sg}", "input"),
+            zone_route_step,
             ("REST: DelayInms=0-85", "highlight"),
             ("SSH: dsp \u2192 output_db", "measure"),
             ("REST GET \u2192 DelayInms", "measure"),
             ("Assert signal + readback", "verify"),
         ],
         "Mute": [
-            ("SSH: dsp tone + mix", "input"),
+            (f"SSH: dsp tone {sg}", "input"),
+            zone_route_step,
             ("REST: IsMuted=true", "highlight"),
-            ("DSP processing", "process"),
             ("SSH: dsp \u2192 output_db", "measure"),
             ("Assert < -80 dB", "verify"),
         ],
@@ -167,14 +180,15 @@ def _get_category_paths(model="4ZSA"):
         ],
         "Loudness": [
             ("SSH: dsp tone 100Hz", "input"),
-            (f"SSH: dsp mix \u2192 {out1}", "process"),
+            zone_route_step,
             ("REST: Volume=400 (low)", "process"),
             ("REST: Loudness=true", "highlight"),
             ("SSH: dsp \u2192 output_db", "measure"),
             ("Assert boost \u0394", "verify"),
         ],
         "Tone Profiles": [
-            ("SSH: dsp tone + mix", "input"),
+            (f"SSH: dsp tone {sg}", "input"),
+            zone_route_step,
             ("REST: ToneProfile=name", "highlight"),
             ("REST GET ZoneAudio", "measure"),
             ("SSH: dsp \u2192 output_db @ 200/1k/8k", "measure"),
@@ -182,7 +196,7 @@ def _get_category_paths(model="4ZSA"):
         ],
         "Night Mode": [
             ("SSH: dsp tone @ -6dB", "input"),
-            (f"SSH: dsp mix \u2192 {out1}", "process"),
+            zone_route_step,
             ("REST: NightMode=Off/Lo/Med/Hi", "highlight"),
             ("SSH: dsp \u2192 output_db", "measure"),
             ("Assert level \u2264 Off", "verify"),
@@ -194,6 +208,8 @@ def _get_category_paths(model="4ZSA"):
             ("Assert no faults", "verify"),
         ],
         "Eq": [
+            (f"SSH: dsp tone {sg}", "input"),
+            zone_route_step,
             ("REST: PEQ Band Type/Gain/Freq/BW", "highlight"),
             ("REST: IsEqBypassEnabled", "highlight"),
             ("REST GET \u2192 band readback", "measure"),
