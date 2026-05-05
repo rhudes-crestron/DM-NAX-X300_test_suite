@@ -49,8 +49,8 @@ class TestBassTreble:
 
     def _setup_zone(self, dsp, device_cfg, zone, freq_hz):
         """Route signal tone to the zone's left amp output."""
-        sig_ch = device_cfg["signal_generator"]["channel"]
         out_idx, _ = self._output_info(zone)
+        sig_ch = dsp.sig_ch_for_output(out_idx)
         dsp.start_tone(sig_ch, freq_hz, -20)
         if device_cfg.get("dsp_fw_version", 21) >= 42 and dsp.cn is not None:
             dsp._set_tone_source_for_zone(zone)

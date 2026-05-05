@@ -55,10 +55,11 @@ class TestBalance:
 
     def _setup_zone(self, dsp, device_cfg, zone):
         """Route signal generator to the zone's L+R amp outputs."""
-        sig_ch = device_cfg["signal_generator"]["channel"]
         left_idx, right_idx, _, _ = self._output_info(zone)
+        sig_ch = dsp.sig_ch_for_output(left_idx)
 
-        dsp.start_sig_tone()
+        dsp.start_tone(sig_ch, dsp.settings["default_tone_freq_hz"],
+                       dsp.settings["default_tone_gain_db"])
         if device_cfg.get("dsp_fw_version", 21) >= 42 and dsp.cn is not None:
             dsp._set_tone_source_for_zone(zone)
         if device_cfg.get("dsp_fw_version", 21) >= 42:

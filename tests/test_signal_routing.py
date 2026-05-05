@@ -105,7 +105,7 @@ class TestSignalRouting:
         if output_name not in device_cfg["amp_outputs"]:
             pytest.skip(f"{output_name} not available on {device_cfg['model']}")
 
-        sig_ch     = device_cfg["signal_generator"]["channel"]
+        sig_ch     = dsp.sig_ch_for_output(output_idx)
         tone_input = device_cfg.get("dsp_tone_input", "Input01")
         zone       = dsp.zone_for_output(output_idx)
         fw         = device_cfg.get("dsp_fw_version", 21)

@@ -50,8 +50,9 @@ class TestMute:
         output_idx = (zone - 1) * 2  # A1L=0, A2L=2, A3L=4, A4L=6
         output_name = device_cfg["amp_outputs"][output_idx]
 
-        sig_ch = device_cfg["signal_generator"]["channel"]
-        dsp.start_sig_tone()
+        sig_ch = dsp.sig_ch_for_output(output_idx)
+        dsp.start_tone(sig_ch, dsp.settings["default_tone_freq_hz"],
+                       dsp.settings["default_tone_gain_db"])
         dsp.route_sig_to_output(output_idx)
 
         # Mute this zone

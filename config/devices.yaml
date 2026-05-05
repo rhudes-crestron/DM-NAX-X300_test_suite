@@ -81,8 +81,9 @@ devices:
       T1: { channels: ["T1L","T1R"], index: [2,3], type: "stream" }
       L1: { channels: ["L1L","L1R"], index: [4,5], type: "line", has_adc: true }
       L2: { channels: ["L2L","L2R"], index: [6,7], type: "line", has_adc: true }
-    signal_generator: { channel: 0, name: "S1L" }
-    mixer_outputs: 8
+    signal_generator:      { channel: 0, name: "T1L" }   # DSP block 0 (zones 1-4)
+    signal_generator_dsp1: { channel: 8, name: "T2L" }   # DSP block 1 (zones 5-8)
+    mixer_outputs: 16   # two 8-ch DSP blocks = 16 mixer outputs
     engineering_debug:
       auto_enable_for_streaming: true
       zip_file: ""

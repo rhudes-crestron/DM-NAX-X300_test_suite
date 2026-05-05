@@ -74,12 +74,21 @@ class DSPController:
         physical input (ch 0 = T1L) that can bleed to all outputs through
         default routing.  Clearing every crosspoint for this channel
         guarantees isolation before routing to a single target.
+
+        On dual-block devices (8ZSA) also clear the block-1 signal generator.
         """
         num_outputs = self.cfg.get("mixer_outputs", 10)
         cmds = [f"dsp mix {self.sig_ch} {out} -200" for out in range(num_outputs)]
         for cmd in cmds:
             self.ssh.execute(cmd, timeout=10)
         logger.info("Cleared all %d sig routes for ch %d", num_outputs, self.sig_ch)
+        # Also clear DSP block 1 signal generator if present
+        dsp1 = self.cfg.get("signal_generator_dsp1")
+        if dsp1:
+            sig_ch1 = dsp1["channel"]
+            for out in range(num_outputs):
+                self.ssh.execute(f"dsp mix {sig_ch1} {out} -200", timeout=10)
+            logger.info("Cleared all %d sig routes for ch %d (dsp1)", num_outputs, sig_ch1)
 
     def _set_tone_source_for_zone(self, zone):
         """Route a zone to tone input using the best CresNext path for platform mode.
@@ -122,10 +131,26 @@ class DSPController:
                 if 1 <= zone <= max_zone:
                     self._set_tone_source_for_zone(zone)
             self.clear_all_sig_routes()
-        return self.set_mixer(self.sig_ch, output_ch, gain_db)
+        sig_ch = self.sig_ch_for_output(output_ch)
+        return self.set_mixer(sig_ch, output_ch, gain_db)
 
     def clear_sig_route(self, output_ch):
-        return self.clear_mixer(self.sig_ch, output_ch)
+        sig_ch = self.sig_ch_for_output(output_ch)
+        return self.clear_mixer(sig_ch, output_ch)
+
+    def sig_ch_for_output(self, output_idx):
+        """Return the correct signal generator channel for a given output index.
+
+        On dual-DSP-block devices (8ZSA), outputs 0-7 live on block 0
+        (use signal_generator.channel) and outputs 8-15 live on block 1
+        (use signal_generator_dsp1.channel).  A tone started on block 0
+        cannot be routed to block 1 outputs and vice versa.
+        """
+        if output_idx >= 8:
+            dsp1 = self.cfg.get("signal_generator_dsp1")
+            if dsp1:
+                return dsp1["channel"]
+        return self.sig_ch
 
     # ------------------------------------------------------------------
     # Input compensation / gain
