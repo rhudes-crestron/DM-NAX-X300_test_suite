@@ -72,9 +72,9 @@ devices:
 
   DM-NAX-8ZSA:
     <<: *nax_8zone
-    ip: "192.168.1.178"
+    ip: "dm-nax-8zsa-00107fb5d1e3"
     username: "admin"
-    password: "crestron"
+    password: "Crestron123"
     model: "8ZSA"
     physical_inputs:
       S1: { channels: ["S1L","S1R"], index: [0,1], type: "stream" }
