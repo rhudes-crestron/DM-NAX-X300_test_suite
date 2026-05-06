@@ -150,3 +150,7 @@ email:
   base_url: "http://nj6v-docker-04"    # dashboard hostname for report links
   recipients:
     - "praghupathy@crestron.com"
+    - "ageormaneanu@crestron.com"
+    - "rdondeti@crestron.com"
+    - "gennady@crestron.com"
+    - "PRadev@crestron.com"
