@@ -233,7 +233,7 @@ def _parse_fw42_data(lines, state):
             agc_db = _parse_float(out_m.group(3))
             agc_gain_db = _parse_float(out_m.group(4))
             limiter_db = _parse_float(out_m.group(6))
-            output_db = _parse_float(out_m.group(7))  # use L value
+            output_db = _parse_float(out_m.group(8))  # use A (amp) value — post-EQ
 
         # Map zone name to amp name for test compatibility (Z1L → A1L)
         mapped_name = _ZONE_TO_AMP.get(out_name_raw, out_name_raw)
