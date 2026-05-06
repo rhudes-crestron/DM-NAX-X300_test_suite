@@ -95,16 +95,23 @@ class DSPController:
 
         8ZSA/4ZSP fw42 devices in MP1 often require the StreamRoutings-style
         route path. Fall back to per-zone AvMatrixRouting if unsupported.
+
+        IMPORTANT: Setting AvMatrixRouting triggers HandleNewRoute which resets
+        the zone volume to default (~30%).  Callers MUST set Volume=800 AFTER
+        this method returns.  A brief settle delay is included so the async
+        volume reset completes before the caller can override it.
         """
         if self.cn is None:
             return
 
         tone_input = self.cfg.get("dsp_tone_input", "Input01")
         model = str(self.cfg.get("model", "")).upper()
+        route_settle = self.settings.get("route_settle_time_s", 0.5)
 
         if model in {"8ZSA", "4ZSP"}:
             try:
                 self.cn.set_zone_sources_streamrouting({int(zone): tone_input})
+                time.sleep(route_settle)
                 return
             except Exception as e:
                 logger.warning(
@@ -115,6 +122,7 @@ class DSPController:
                 )
 
         self.cn.set_zone_source(zone, tone_input)
+        time.sleep(route_settle)
 
     def route_sig_to_output(self, output_ch, gain_db=0):
         """Route signal generator to a specific output channel.

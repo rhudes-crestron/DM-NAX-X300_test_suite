@@ -171,6 +171,7 @@ firmware:
 # Test execution settings
 test_settings:
   signal_settle_time_s: 1.5
+  route_settle_time_s: 0.5       # delay after AvMatrixRouting for HandleNewRoute volume reset
   level_tolerance_db: 1.0
   mute_floor_db: -110.0
   default_tone_freq_hz: 1000
