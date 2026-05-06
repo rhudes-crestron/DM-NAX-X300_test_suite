@@ -178,10 +178,10 @@ class DSPController:
                 max_zone = self.cfg.get("zones", 4)
                 if 1 <= zone <= max_zone:
                     self._set_tone_source_for_zone(zone)
-            self.clear_all_sig_routes()
-            # Use MIXER_CFG_CH_OUT to activate the output zone chain
-            sig_ch = self.sig_ch_for_output(output_ch)
-            return self.set_mixer_output(output_ch, sig_ch, gain_db)
+            # AvMatrixRouting handles mixer routing + zone-chain activation
+            # internally via DspAudioCtl.  Console mixer commands would
+            # override the programmed route and bypass zone processing.
+            return
         sig_ch = self.sig_ch_for_output(output_ch)
         return self.set_mixer(sig_ch, output_ch, gain_db)
 

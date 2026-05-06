@@ -61,9 +61,9 @@ class TestBassTreble:
         if model in {"8ZSA", "4ZSP"}:
             if dsp.cn is not None:
                 dsp._set_tone_source_for_zone(zone)
-            dsp.clear_all_sig_routes()
-            # Use MIXER_CFG_CH_OUT to activate zone-chain processing
-            dsp.set_mixer_output(out_idx, sig_ch, 0)
+            # AvMatrixRouting handles mixer routing + zone-chain activation
+            # internally via DspAudioCtl.  Do NOT use dsp mix/mixout which
+            # would override the programmed route and bypass zone processing.
         else:
             dsp.set_mixer(sig_ch, out_idx, 0)
 
