@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DM-NAX Audio Signal Flow &amp; Test Reference</title>
+<style>
+:root {
+    --bg-dark: #1a1a2e;
+    --bg-card: #16213e;
+    --bg-code: #0f3460;
+    --accent: #e94560;
+    --accent2: #0ea5e9;
+    --accent3: #10b981;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --border: #334155;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg-dark);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+}
+h1 { color: var(--accent); margin-bottom: 0.5rem; font-size: 2rem; }
+h2 { color: var(--accent2); margin: 2rem 0 1rem; border-bottom: 2px solid var(--border); padding-bottom: 0.5rem; }
+h3 { color: var(--accent3); margin: 1.5rem 0 0.75rem; }
+h4 { color: var(--text); margin: 1rem 0 0.5rem; }
+.subtitle { color: var(--text-dim); margin-bottom: 2rem; }
+.device-tabs {
+    display: flex; gap: 0.5rem; margin: 1.5rem 0; flex-wrap: wrap;
+}
+.device-tab {
+    padding: 0.5rem 1.2rem; border-radius: 6px; cursor: pointer;
+    background: var(--bg-code); border: 1px solid var(--border);
+    color: var(--text-dim); font-weight: 600; transition: all 0.2s;
+}
+.device-tab.active, .device-tab:hover {
+    background: var(--accent2); color: #fff; border-color: var(--accent2);
+}
+.device-panel { display: none; }
+.device-panel.active { display: block; }
+.signal-chain {
+    background: var(--bg-code); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1.2rem 1.5rem; margin: 1rem 0;
+    font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.9rem;
+    overflow-x: auto; white-space: pre;
+}
+.signal-chain .block { color: var(--accent3); font-weight: bold; }
+.signal-chain .measure { color: var(--accent); font-weight: bold; }
+.signal-chain .arrow { color: var(--text-dim); }
+.card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1.5rem; margin: 1.5rem 0;
+}
+table {
+    width: 100%; border-collapse: collapse; margin: 1rem 0;
+    font-size: 0.9rem;
+}
+th { background: var(--bg-code); color: var(--accent2); text-align: left; padding: 0.75rem 1rem; }
+td { padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); }
+tr:hover td { background: rgba(14,165,233,0.05); }
+code {
+    background: var(--bg-code); padding: 0.15rem 0.4rem; border-radius: 4px;
+    font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.85rem;
+}
+.cmd { color: #fbbf24; }
+.note {
+    background: rgba(233,69,96,0.1); border-left: 3px solid var(--accent);
+    padding: 0.75rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0;
+}
+.info-note {
+    background: rgba(14,165,233,0.1); border-left: 3px solid var(--accent2);
+    padding: 0.75rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0;
+}
+.pass-fail { margin: 0.75rem 0; }
+.pass-fail li { margin: 0.3rem 0; list-style: none; padding-left: 1.5rem; position: relative; }
+.pass-fail li::before { content: "✓"; position: absolute; left: 0; color: var(--accent3); font-weight: bold; }
+.toc { background: var(--bg-card); border-radius: 10px; padding: 1.5rem 2rem; margin: 1.5rem 0; }
+.toc ul { list-style: none; }
+.toc li { margin: 0.4rem 0; }
+.toc a { color: var(--accent2); text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+.dual-block { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 900px) { .dual-block { grid-template-columns: 1fr; } }
+.legend { display: flex; gap: 2rem; flex-wrap: wrap; margin: 1rem 0; font-size: 0.85rem; }
+.legend-item { display: flex; align-items: center; gap: 0.5rem; }
+.legend-dot { width: 12px; height: 12px; border-radius: 50%; }
+footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+
+<h1>DM-NAX Audio Signal Flow &amp; Test Verification Reference</h1>
+<p class="subtitle">DSP Test Suite — Signal chain documentation for building and debugging automated tests</p>
+
+<div class="toc">
+<h3>Table of Contents</h3>
+<ul>
+    <li><a href="#architecture">1. Device Architecture Overview</a></li>
+    <li><a href="#dsp-command">2. DSP Command &amp; Measurement Points</a></li>
+    <li><a href="#test-volume">3. Volume Test</a></li>
+    <li><a href="#test-mute">4. Mute Test</a></li>
+    <li><a href="#test-eq">5. EQ Test</a></li>
+    <li><a href="#test-balance">6. Balance Test</a></li>
+    <li><a href="#test-bass-treble">7. Bass &amp; Treble Test</a></li>
+    <li><a href="#test-delay">8. Delay Test</a></li>
+    <li><a href="#test-streaming">9. Streaming Test</a></li>
+    <li><a href="#test-loudness">10. Loudness Test</a></li>
+    <li><a href="#test-night-mode">11. Night Mode Test</a></li>
+    <li><a href="#test-crosstalk">12. Crosstalk Test</a></li>
+    <li><a href="#test-snr">13. Signal-to-Noise Ratio Test</a></li>
+    <li><a href="#test-input-comp">14. Input Compensation Test</a></li>
+    <li><a href="#quick-ref">15. Quick Reference: DSP Commands</a></li>
+</ul>
+</div>
+
+<!-- ==================== SECTION: Architecture ==================== -->
+<h2 id="architecture">1. Device Architecture Overview</h2>
+
+<div class="device-tabs">
+    <div class="device-tab active" onclick="switchDevice('4zsa')">DM-NAX-4ZSA</div>
+    <div class="device-tab" onclick="switchDevice('8zsa')">DM-NAX-8ZSA</div>
+    <div class="device-tab" onclick="switchDevice('4zsp')">DM-NAX-4ZSP</div>
+</div>
+
+<div id="panel-4zsa" class="device-panel active">
+<div class="card">
+    <h3>DM-NAX-4ZSA — 4-Zone Streaming Amplifier</h3>
+    <table>
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>Zones</td><td>4 (stereo pairs: out0/1, out2/3, out4/5, out6/7)</td></tr>
+        <tr><td>DSP Blocks</td><td>1 (single block)</td></tr>
+        <tr><td>Signal Generator</td><td>Channel 28 (<code>SIG</code>)</td></tr>
+        <tr><td>Mixer Outputs</td><td>10</td></tr>
+        <tr><td>MediaPlayer Streams</td><td>5 (starting at stream index 5)</td></tr>
+        <tr><td>Streaming Measurement</td><td><code>M{n}L</code> / <code>M{n}R</code> (mux inputs, pre-DSP)</td></tr>
+    </table>
+    <h4>Signal Chain (Output Zone):</h4>
+    <div class="signal-chain"><span class="block">Input</span> <span class="arrow">→</span> <span class="block">Mixer</span> <span class="arrow">→</span> <span class="measure">[Balance]</span> <span class="arrow">→</span> <span class="block">Ducker</span> <span class="arrow">→</span> <span class="block">AGC</span> <span class="arrow">→</span> <span class="block">EQ</span> <span class="arrow">→</span> <span class="block">Limiter</span> <span class="arrow">→</span> <span class="measure">Amp</span>
+                      <span class="arrow">↑</span>
+         Balance is here (OUTPUT zone chain, post-mixer)</div>
+    <div class="info-note">
+        <strong>Key:</strong> Balance is applied AFTER the mixer in the output zone chain. 
+        A single signal source routed to both L/R outputs is affected by Balance independently on each output.
+    </div>
+</div>
+</div>
+
+<div id="panel-8zsa" class="device-panel">
+<div class="card">
+    <h3>DM-NAX-8ZSA — 8-Zone Streaming Amplifier</h3>
+    <table>
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>Zones</td><td>8 (stereo pairs: out0/1 through out14/15)</td></tr>
+        <tr><td>DSP Blocks</td><td>2 (dual block)</td></tr>
+        <tr><td>Signal Generator — Block 0</td><td>Channel 0 (<code>T1L</code>) — serves zones 1–4</td></tr>
+        <tr><td>Signal Generator — Block 1</td><td>Channel 8 (<code>T2L</code>) — serves zones 5–8</td></tr>
+        <tr><td>Mixer Outputs</td><td>16 (8 per block)</td></tr>
+        <tr><td>MediaPlayer Streams</td><td>8 (starting at stream index 5)</td></tr>
+        <tr><td>Streaming Measurement</td><td><code>A{n}L</code> / <code>A{n}R</code> (amp outputs, post-DSP)</td></tr>
+    </table>
+    <h4>Dual-Block Layout:</h4>
+    <div class="dual-block">
+        <div class="card">
+            <h4 style="color: var(--accent2);">Block 0 — Zones 1–4</h4>
+            <table>
+                <tr><th>Zone</th><th>Output L</th><th>Output R</th><th>Sig Gen</th></tr>
+                <tr><td>Zone 1</td><td>out0</td><td>out1</td><td>ch0 (T1L)</td></tr>
+                <tr><td>Zone 2</td><td>out2</td><td>out3</td><td>ch0</td></tr>
+                <tr><td>Zone 3</td><td>out4</td><td>out5</td><td>ch0</td></tr>
+                <tr><td>Zone 4</td><td>out6</td><td>out7</td><td>ch0</td></tr>
+            </table>
+        </div>
+        <div class="card">
+            <h4 style="color: var(--accent);">Block 1 — Zones 5–8</h4>
+            <table>
+                <tr><th>Zone</th><th>Output L</th><th>Output R</th><th>Sig Gen</th></tr>
+                <tr><td>Zone 5</td><td>out8</td><td>out9</td><td>ch8 (T2L)</td></tr>
+                <tr><td>Zone 6</td><td>out10</td><td>out11</td><td>ch8</td></tr>
+                <tr><td>Zone 7</td><td>out12</td><td>out13</td><td>ch8</td></tr>
+                <tr><td>Zone 8</td><td>out14</td><td>out15</td><td>ch8</td></tr>
+            </table>
+        </div>
+    </div>
+    <h4>Signal Chain (Output Zone):</h4>
+    <div class="signal-chain"><span class="measure">[Balance]</span> <span class="arrow">→</span> <span class="block">Input</span> <span class="arrow">→</span> <span class="block">Mixer</span> <span class="arrow">→</span> <span class="block">Ducker</span> <span class="arrow">→</span> <span class="block">AGC</span> <span class="arrow">→</span> <span class="block">EQ</span> <span class="arrow">→</span> <span class="block">Limiter</span> <span class="arrow">→</span> <span class="measure">Amp</span>
+  <span class="arrow">↑</span>
+  Balance is here (INPUT level, pre-mixer)</div>
+    <div class="note">
+        <strong>Critical Difference:</strong> Balance is applied to the INPUT channel level BEFORE the mixer.
+        This means to test Balance, you MUST route separate L and R tone channels (e.g., ch0→out0, ch1→out1)
+        so each input's level can be attenuated independently by the Balance control.
+    </div>
+    <div class="info-note">
+        <strong>Streaming:</strong> No <code>M{n}L</code> mux inputs exist in the DSP table.
+        Streaming level is measured at the amp output (<code>A{n}L</code>) after the full zone processing chain.
+    </div>
+</div>
+</div>
+
+<div id="panel-4zsp" class="device-panel">
+<div class="card">
+    <h3>DM-NAX-4ZSP — 4-Zone Streaming Processor</h3>
+    <table>
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>Zones</td><td>4 (same DSP architecture as 8ZSA, but only first 4 active)</td></tr>
+        <tr><td>DSP Blocks</td><td>1 (single block, 8ZSA-style processing)</td></tr>
+        <tr><td>Signal Generator</td><td>Channel 0 (<code>T1L</code>)</td></tr>
+        <tr><td>Mixer Outputs</td><td>16</td></tr>
+        <tr><td>Balance Position</td><td>INPUT level (pre-mixer) — same as 8ZSA</td></tr>
+        <tr><td>Streaming Measurement</td><td><code>A{n}L</code> / <code>A{n}R</code> (amp outputs)</td></tr>
+    </table>
+    <h4>Signal Chain (Output Zone):</h4>
+    <div class="signal-chain"><span class="measure">[Balance]</span> <span class="arrow">→</span> <span class="block">Input</span> <span class="arrow">→</span> <span class="block">Mixer</span> <span class="arrow">→</span> <span class="block">Ducker</span> <span class="arrow">→</span> <span class="block">AGC</span> <span class="arrow">→</span> <span class="block">EQ</span> <span class="arrow">→</span> <span class="block">Limiter</span> <span class="arrow">→</span> <span class="measure">Amp</span></div>
+</div>
+</div>
+
+<!-- ==================== SECTION: DSP Command ==================== -->
+<h2 id="dsp-command">2. DSP Command &amp; Measurement Points</h2>
+
+<div class="card">
+<h3>Reading the <code>dsp</code> Command Output</h3>
+<p>The <code>dsp</code> console command dumps the full audio state table. Each row represents one signal path through the DSP.</p>
+
+<h4>4ZSA Output Format:</h4>
+<div class="signal-chain">|Ch|Name |-|VCG|AG|DVO| (Bal)  Line   |Src       | |Ch| (Bal/Trim) Ducker   AGC   (Gain)  Limiter  <span class="measure">Amp</span>    Inv |  Output| Dly|
+|00|S1L  |-|VCG|AG|DVO| (  0.0)  -14.11 |1000@-20| |00| (  0.0/  1.0)  -20.11  -20.12 (-50.0)  -69.12  <span class="measure">-69.13</span> -1.00 |     A1L|  0|</div>
+
+<h4>8ZSA / 4ZSP Output Format:</h4>
+<div class="signal-chain">| InputName |(InputGain) InputLevel |  | Ch| OutputName |[Freq@dB] (Bal/Gain) MixerLevel |(Trim) Ducker AGC (GainL/GainA) Lim <span class="measure">OutL/OutA</span> |
+| T1L       |(  0.0)    -20.11      |  | 0| Z1L        |1000@ -20 (  0.0/  0.0)  -20.11  |(  0.0)  -20.12  -20.11 (  0.0/  0.0)  -20.11  <span class="measure">-20.12/ -20.11</span> |</div>
+
+<div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background: var(--accent3);"></div> Processing blocks</div>
+    <div class="legend-item"><div class="legend-dot" style="background: var(--accent);"></div> Measurement points (used by tests)</div>
+</div>
+
+<h4>Key Measurement Columns:</h4>
+<table>
+    <tr><th>Column</th><th>Description</th><th>Used By</th></tr>
+    <tr><td><code>Line</code> (4ZSA)</td><td>Input level BEFORE zone EQ/processing</td><td>NOT used for pass/fail (pre-EQ)</td></tr>
+    <tr><td><code>Amp</code> / <code>OutA</code></td><td><strong>Final amplifier output level (post-EQ, post-limiter)</strong></td><td>Volume, Mute, EQ, Balance, Bass/Treble, Delay</td></tr>
+    <tr><td><code>Ducker</code></td><td>Level after mixer crosspoint, before volume/AGC</td><td>Level Linearity, Freq Response</td></tr>
+    <tr><td><code>AGC</code></td><td>AGC output level</td><td>Clipping test</td></tr>
+    <tr><td><code>(Gain)</code></td><td>AGC gain reduction applied</td><td>Clipping test (must be ≤2dB)</td></tr>
+    <tr><td><code>InputGain</code> (8ZSA)</td><td>Input compensation gain setting</td><td>Input Compensation test</td></tr>
+    <tr><td><code>M{n}L</code></td><td>Mux input (streaming audio entry point) — 4ZSA only</td><td>Streaming test (4ZSA)</td></tr>
+    <tr><td><code>A{n}L</code></td><td>Amp output name/level — 8ZSA/4ZSP</td><td>Streaming test (8ZSA, 4ZSP)</td></tr>
+</table>
+
+<div class="note">
+    <strong>Parser Bug (Fixed):</strong> Originally the parser read the "Line" column (pre-EQ) instead of "Amp" (post-EQ).
+    This caused EQ tests to always pass since they were measuring a point BEFORE EQ was applied.
+    Fix: <code>output_db</code> now correctly reads from the Amp/OutA column.
+</div>
+</div>
+
+<!-- ==================== SECTION: Volume ==================== -->
+<h2 id="test-volume">3. Volume Test</h2>
+
+<div class="card">
+<h3>Purpose</h3>
+<p>Verify that CresNext volume control (0–100%) produces a monotonically decreasing audio level at the amplifier output.</p>
+
+<h4>Signal Flow — All Devices:</h4>
+<div class="signal-chain"><span class="block">Tone Gen (1kHz @ -20dB)</span> <span class="arrow">→</span> <span class="block">Mixer (crosspoint=0dB)</span> <span class="arrow">→</span> Volume Control <span class="arrow">→</span> AGC <span class="arrow">→</span> EQ (flat) <span class="arrow">→</span> Limiter <span class="arrow">→</span> <span class="measure">Amp Output (A{n}L)</span></div>
+
+<h4>Setup per Device:</h4>
+<table>
+    <tr><th>Device</th><th>Sig Gen Channel</th><th>Routing</th><th>Measurement</th></tr>
+    <tr><td>4ZSA</td><td>ch28 (SIG)</td><td><code>dsp mix 28 {out} 0</code></td><td><code>A{n}L</code> output_db</td></tr>
+    <tr><td>8ZSA Zone 1–4</td><td>ch0 (T1L)</td><td><code>dsp mix 0 {out} 0</code></td><td><code>A{n}L</code> output_db</td></tr>
+    <tr><td>8ZSA Zone 5–8</td><td>ch8 (T2L)</td><td><code>dsp mix 8 {out} 0</code></td><td><code>A{n}L</code> output_db</td></tr>
+</table>
+
+<h4>DSP Commands:</h4>
+<div class="signal-chain"><span class="cmd">dsp tone {sig_ch} 1000 -20</span>       # Start 1kHz tone at -20dB on signal generator
+<span class="cmd">dsp mix {sig_ch} {out_L} 0</span>        # Route tone to left output at 0dB gain
+<span class="cmd">dsp</span>                                # Read full state → parse Amp column</div>
+
+<h4>CresNext API:</h4>
+<div class="signal-chain">PUT /device/audioConfig/zones/{zone}/volume/level → {value}     # 0-100%</div>
+
+<h4>Pass/Fail Criteria:</h4>
+<ul class="pass-fail">
+    <li>Volume 100% → level within expected range (≈-20dB for -20dB tone)</li>
+    <li>Each step down produces equal or lower level (monotonic decrease)</li>
+    <li>Volume 0% → level drops ≥10dB from maximum</li>
+    <li>Level at Amp output used — NOT Line level</li>
+</ul>
+</div>
+
+<!-- ==================== SECTION: Mute ==================== -->
+<h2 id="test-mute">4. Mute Test</h2>
+
+<div class="card">
+<h3>Purpose</h3>
+<p>Verify zone mute completely silences the amplifier output and unmute restores audio.</p>
+
+<h4>Signal Flow — All Devices:</h4>
+<div class="signal-chain"><span class="block">Tone Gen (1kHz @ -20dB)</span> <span class="arrow">→</span> <span class="block">Mixer</span> <span class="arrow">→</span> <span class="measure">[MUTE]</span> <span class="arrow">→</span> AGC <span class="arrow">→</span> EQ <span class="arrow">→</span> Limiter <span class="arrow">→</span> <span class="measure">Amp Output (A{n}L)</span></div>
+
+<h4>DSP + CresNext Commands:</h4>
+<div class="signal-chain"><span class="cmd">dsp tone {sig_ch} 1000 -20</span>           # Generate tone
+<span class="cmd">dsp mix {sig_ch} {out_L} 0</span>            # Route to output
+
+# Unmuted state:
+PUT /device/audioConfig/zones/{zone}/mute → false
+<span class="cmd">dsp</span>  → A{n}L output_db → expect > -80 dB
+
+# Muted state:
+PUT /device/audioConfig/zones/{zone}/mute → true
+<span class="cmd">dsp</span>  → A{n}L output_db → expect < -110 dB (mute floor)</div>
+
+<h4>Pass/Fail Criteria:</h4>
+<ul class="pass-fail">
+    <li>Muted: Amp output &lt; -110 dB (effectively silent)</li>
+    <li>Unmuted: Amp output &gt; -80 dB (signal clearly present)</li>
+    <li>Transition is immediate (no fade artifacts)</li>
+</ul>
+</div>
+
+<!-- ==================== SECTION: EQ ==================== -->
+<h2 id="test-eq">5. EQ Test</h2>
+
+<div class="card">
+<h3>Purpose</h3>
+<p>Verify parametric EQ bands produce measurable boost/cut at the amplifier output. Tests peaking, high-shelf, low-shelf, high-pass, and low-pass filter types.</p>
+
+<h4>Signal Flow — All Devices:</h4>
+<div class="signal-chain"><span class="block">Tone Gen (target freq @ -20dB)</span> <span class="arrow">→</span> <span class="block">Mixer</span> <span class="arrow">→</span> Ducker <span class="arrow">→</span> AGC <span class="arrow">→</span> <span class="measure">[EQ]</span> <span class="arrow">→</span> Limiter <span class="arrow">→</span> <span class="measure">Amp Output (A{n}L)</span>
+                                                                                          <span class="arrow">↑</span>
+                                                                             EQ applied HERE — measured at Amp (post-EQ)</div>
+
+<div class="note">
+    <strong>Why Amp (post-EQ) and NOT Line (pre-EQ):</strong> The "Line" column in the 4ZSA DSP output shows the signal
+    BEFORE zone EQ is applied. Measuring "Line" would always show the same level regardless of EQ settings.
+    The "Amp" column shows the signal AFTER EQ, which is what we need to verify EQ is working.
+</div>
+
+<h4>8ZSA Dual-Block Signal Generator:</h4>
+<table>
+    <tr><th>Zone</th><th>Output Index (L)</th><th>Sig Gen Channel</th><th>Reason</th></tr>
+    <tr><td>1</td><td>0</td><td>ch0 (T1L)</td><td>Block 0</td></tr>
+    <tr><td>2</td><td>2</td><td>ch0</td><td>Block 0</td></tr>
+    <tr><td>3</td><td>4</td><td>ch0</td><td>Block 0</td></tr>
+    <tr><td>4</td><td>6</td><td>ch0</td><td>Block 0</td></tr>
+    <tr><td>5</td><td>8</td><td><strong>ch8 (T2L)</strong></td><td>Block 1 — different sig gen!</td></tr>
+    <tr><td>6</td><td>10</td><td>ch8</td><td>Block 1</td></tr>
+    <tr><td>7</td><td>12</td><td>ch8</td><td>Block 1</td></tr>
+    <tr><td>8</td><td>14</td><td>ch8</td><td>Block 1</td></tr>
+</table>
+
+<h4>Test Sequence:</h4>
+<div class="signal-chain">1. Set EQ flat (all bands disabled)
+2. Start tone at target frequency
+3. Read Amp level → <strong>baseline</strong>
+4. Enable EQ band (e.g., +12dB peaking at 1kHz)
+5. Read Amp level → <strong>boosted</strong>
+6. Verify: boosted - baseline ≥ 6dB (for peaking boost)</div>
+
+<h4>EQ Types &amp; Thresholds:</h4>
+<table>
+    <tr><th>EQ Type</th><th>Tone Frequency</th><th>Setting</th><th>Expected Delta</th></tr>
+    <tr><td>Peaking (boost)</td><td>Band center freq</td><td>+12dB, Q=1</td><td>≥ 6 dB boost</td></tr>
+    <tr><td>High Shelf (boost)</td><td>10 kHz</td><td>+12dB</td><td>≥ 4 dB boost</td></tr>
+    <tr><td>Low Shelf (boost)</td><td>100 Hz</td><td>+12dB</td><td>≥ 4 dB boost</td></tr>
+    <tr><td>High-Pass Filter</td><td>Below cutoff</td><td>fc=500Hz</td><td>≥ 6 dB attenuation</td></tr>
+    <tr><td>Low-Pass Filter</td><td>Above cutoff</td><td>fc=2kHz</td><td>≥ 6 dB attenuation</td></tr>
+</table>
+</div>
+
+<!-- ==================== SECTION: Balance ==================== -->
+<h2 id="test-balance">6. Balance Test</h2>
+
+<div class="card">
+<h3>Purpose</h3>
+<p>Verify Balance control produces correct L/R level difference. This test has significantly different implementations per device due to where Balance lives in the signal chain.</p>
+
+<div class="device-tabs">
+    <div class="device-tab active" onclick="switchBalanceDevice('bal-4zsa')">4ZSA</div>
+    <div class="device-tab" onclick="switchBalanceDevice('bal-8zsa')">8ZSA / 4ZSP</div>
+</div>
+
+<div id="bal-4zsa" class="device-panel active">
+<h4>4ZSA — Balance in OUTPUT Zone Chain (Post-Mixer):</h4>
+<div class="signal-chain"><span class="block">Tone (ch28)</span> <span class="arrow">→</span> <span class="block">Mixer</span> <span class="arrow">→┬→</span> <span class="measure">[Balance L]</span> <span class="arrow">→</span> EQ <span class="arrow">→</span> Limiter <span class="arrow">→</span> <span class="measure">A{n}L</span>
+                               <span class="arrow">└→</span> <span class="measure">[Balance R]</span> <span class="arrow">→</span> EQ <span class="arrow">→</span> Limiter <span class="arrow">→</span> <span class="measure">A{n}R</span></div>
+<p>Same source (ch28) is routed to BOTH L and R outputs. Balance attenuates each output independently in the zone chain.</p>
+<div class="signal-chain"><span class="cmd">dsp tone 28 1000 -20</span>
+<span class="cmd">dsp mix 28 {out_L} 0</span>      # Route SIG→left  output
+<span class="cmd">dsp mix 28 {out_R} 0</span>      # Route SIG→right output (SAME source!)
+<span class="cmd">dsp</span>                        # Read A{n}L and A{n}R</div>
+</div>
+
+<div id="bal-8zsa" class="device-panel">
+<h4>8ZSA / 4ZSP — Balance on INPUT Level (Pre-Mixer):</h4>
+<div class="signal-chain"><span class="block">Tone L (ch{sig})</span> <span class="arrow">→</span> <span class="measure">[Balance → attenuates L input]</span> <span class="arrow">→</span> <span class="block">Mixer (ch{sig}→out_L)</span> <span class="arrow">→</span> EQ <span class="arrow">→</span> <span class="measure">A{n}L</span>
+<span class="block">Tone R (ch{sig+1})</span> <span class="arrow">→</span> <span class="measure">[Balance → attenuates R input]</span> <span class="arrow">→</span> <span class="block">Mixer (ch{sig+1}→out_R)</span> <span class="arrow">→</span> EQ <span class="arrow">→</span> <span class="measure">A{n}R</span></div>
+<div class="note">
+    <strong>Critical:</strong> You MUST use separate L and R input channels with 1:1 routing!<br>
+    If you route the same source to both outputs (like on 4ZSA), Balance has no effect because
+    it attenuates the INPUT, and both outputs share the same post-mixer path.
+</div>
+<div class="signal-chain"><span class="cmd">dsp tone {sig_ch} 1000 -20</span>       # Tone on L input
+<span class="cmd">dsp tone {sig_ch+1} 1000 -20</span>     # Tone on R input (separate channel!)
+<span class="cmd">dsp mix {sig_ch} {out_L} 0</span>        # Route L→L (1:1)
+<span class="cmd">dsp mix {sig_ch+1} {out_R} 0</span>      # Route R→R (1:1)
+<span class="cmd">dsp</span>                                # Read A{n}L and A{n}R</div>
+<p><strong>Example for Zone 5 (Block 1):</strong> sig_ch=8, sig_ch+1=9, out_L=8, out_R=9</p>
+</div>
+
+<h4>CresNext API:</h4>
+<div class="signal-chain">PUT /device/audioConfig/zones/{zone}/balance → {-100 to +100}
+     -100 = Full Left (L loud, R silent)
+        0 = Center (L = R)
+     +100 = Full Right (R loud, L silent)</div>
+
+<h4>Pass/Fail Criteria:</h4>
+<ul class="pass-fail">
+    <li>Center (0): |L - R| &lt; 2 dB</li>
+    <li>Full Left (-100): L - R &gt; 2 dB (L is louder)</li>
+    <li>Full Right (+100): R - L &gt; 2 dB (R is louder)</li>
+    <li>Retry once if outputs are missing (SSH truncation on large DSP tables)</li>
+</ul>
+</div>
+
+<!-- ==================== SECTION: Bass & Treble ==================== -->
+<h2 id="test-bass-treble">7. Bass &amp; Treble Test</h2>
+
+<div class="card">
+<h3>Purpose</h3>
+<p>Verify tone control (Bass/Treble) produces measurable level change at low/high frequencies at the amplifier output.</p>
+
+<h4>Signal Flow:</h4>
+<div class="signal-chain"><span class="block">Tone Gen (100Hz or 10kHz @ -20dB)</span> <span class="arrow">→</span> <span class="block">Mixer</span> <span class="arrow">→</span> Ducker <span class="arrow">→</span> AGC <span class="arrow">→</span> <span class="measure">[Bass/Treble EQ]</span> <span class="arrow">→</span> Limiter <span class="arrow">→</span> <span class="measure">Amp (A{n}L)</span></div>
+
+<h4>Test Matrix:</h4>
+<table>
+    <tr><th>Control</th><th>Tone Frequency</th><th>Setting</th><th>Expected Effect at Amp</th></tr>
+    <tr><td>Bass +12dB</td><td>100 Hz</td><td>CresNext bass=+12</td><td>Amp level rises ≥ 5 dB vs flat</td></tr>
+    <tr><td>Bass -12dB</td><td>100 Hz</td><td>CresNext bass=-12</td><td>Amp level drops ≥ 5 dB vs flat</td></tr>
+    <tr><td>Treble +12dB</td><td>10,000 Hz</td><td>CresNext treble=+12</td><td>Amp level rises ≥ 5 dB vs flat</td></tr>
+    <tr><td>Treble -12dB</td><td>10,000 Hz</td><td>CresNext treble=-12</td><td>Amp level drops ≥ 5 dB vs flat</td></tr>
+</table>
+
+<h4>DSP Commands:</h4>
+<div class="signal-chain"># Bass test:
+<span class="cmd">dsp tone {sig_ch} 100 -20</span>         # 100Hz tone for bass
+<span class="cmd">dsp mix {sig_ch} {out_L} 0</span>
+
+# Treble test:
+<span class="cmd">dsp tone {sig_ch} 10000 -20</span>       # 10kHz tone for treble
+<span class="cmd">dsp mix {sig_ch} {out_L} 0</span>
+
+# Measure:
+<span class="cmd">dsp</span>                                # Read Amp column (NOT Line!)</div>
+</div>
+
+<!-- ==================== SECTION: Delay ==================== -->
+<h2 id="test-delay">8. Delay Test</h2>
+
+<div class="card">
+<h3>Purpose</h3>
+<p>Verify output delay setting introduces time offset on signal path. Measured via signal detection timing or presence confirmation.</p>
+
+<h4>Signal Flow:</h4>
+<div class="signal-chain"><span class="block">Tone Gen (1kHz @ -20dB)</span> <span class="arrow">→</span> <span class="block">Mixer</span> <span class="arrow">→</span> Volume <span class="arrow">→</span> AGC <span class="arrow">→</span> EQ <span class="arrow">→</span> Limiter <span class="arrow">→</span> <span class="measure">[Delay]</span> <span class="arrow">→</span> <span class="measure">Amp (A{n}L)</span>
+                                                                                                         <span class="arrow">↑</span>
+                                                                                            Delay is LAST in chain before amp</div>
+
+<h4>DSP Commands:</h4>
+<div class="signal-chain"><span class="cmd">dsp tone {sig_ch} 1000 -20</span>
+<span class="cmd">dsp mix {sig_ch} {out_L} 0</span>
+
+# Set delay via CresNext:
+PUT /device/audioConfig/zones/{zone}/delay → {ms value}
+
+# Verify signal presence after delay settles:
+<span class="cmd">dsp</span>  → Check output_db > -110 (signal present) + IsSignalDetected timing</div>
+
+<h4>Pass/Fail Criteria:</h4>
+<ul class="pass-fail">
+    <li>Signal is present at amp output after delay is applied</li>
+    <li>Timing delta: 1ms delay vs 85ms delay shows ≥20ms difference in detection time</li>
+    <li>Delay column in DSP output matches CresNext setting</li>
+</ul>
+</div>
+
+<!-- ==================== SECTION: Streaming ==================== -->
+<h2 id="test-streaming">9. Streaming Test</h2>
+
+<div class="card">
+<h3>Purpose</h3>
+<p>Verify end-to-end audio streaming from HTTP source through MediaPlayer/MediaStreamer into DSP zone outputs.</p>
+
+<h4>Signal Flow — Complete Path:</h4>
+<div class="signal-chain"><span class="block">HTTP WAV Server</span> <span class="arrow">→</span> <span class="block">MediaPlayer (curl)</span> <span class="arrow">→</span> <span class="block">ALSA Playback</span> <span class="arrow">→</span> <span class="block">DSP Input</span> <span class="arrow">→</span> <span class="block">Mixer</span> <span class="arrow">→</span> Zone Chain <span class="arrow">→</span> <span class="measure">Output</span>
+     (test server)         (via bash/engdbg)       (hw:X,Y)         (Streaming input)</div>
+
+<div class="device-tabs">
+    <div class="device-tab" onclick="switchStreamDevice('str-4zsa')">4ZSA</div>
+    <div class="device-tab" onclick="switchStreamDevice('str-8zsa')">8ZSA / 4ZSP</div>
+</div>
+
+<div id="str-4zsa" class="device-panel">
+<h4>4ZSA — Measurement at Mux Input (pre-DSP):</h4>
+<div class="signal-chain">HTTP WAV <span class="arrow">→</span> MediaPlayer <span class="arrow">→</span> ALSA <span class="arrow">→</span> <span class="measure">M{n}L / M{n}R (mux input)</span> <span class="arrow">→</span> Mixer <span class="arrow">→</span> Zone <span class="arrow">→</span> Amp</div>
+<p>Measurement point: <code>M{n}L</code> and <code>M{n}R</code> — reads the streaming audio level at the DSP input BEFORE zone processing.</p>
+<p>Uses <code>measure_input_level()</code> function.</p>
+</div>
+
+<div id="str-8zsa" class="device-panel">
+<h4>8ZSA / 4ZSP — Measurement at Amp Output (post-DSP):</h4>
+<div class="signal-chain">HTTP WAV <span class="arrow">→</span> MediaPlayer <span class="arrow">→</span> ALSA <span class="arrow">→</span> DSP Input <span class="arrow">→</span> Mixer <span class="arrow">→</span> Zone chain <span class="arrow">→</span> <span class="measure">A{n}L / A{n}R (amp output)</span></div>
+<div class="note">
+    <strong>No M{n}L exists!</strong> On 8ZSA/4ZSP, the mux inputs are not exposed in the DSP table.
+    Streaming level must be measured at the amp output after full zone processing.
+</div>
+<p>Uses <code>measure_output_level()</code> function.</p>
+</div>
+
+<h4>Prerequisites — Engineering Debug Mode:</h4>
+<div class="signal-chain">1. Upload engineering_debug.zip via SFTP to /firmware/
+2. Run: <span class="cmd">imgupd engdbg</span>
+3. Verify: <span class="cmd">ver -v</span> → "Eng Debug Mode: True"
+4. SSH port 6022 opens (dropbear) → bash access available
+5. Use: <span class="cmd">curl http://server:port/tone_1khz.wav | aplay -D hw:X,Y</span></div>
+
+<h4>Streaming curl Command (via bash on port 6022):</h4>
+<div class="signal-chain"><span class="cmd">curl -s http://{test_server}:{port}/tone_1khz_stereo.wav | aplay -D hw:0,{zone-1} -f S16_LE -r 48000 -c 2 &</span></div>
+
+<h4>Pass/Fail Criteria:</h4>
+<ul class="pass-fail">
+    <li>Audio level at measurement point: -45 to -20 dB (signal clearly present)</li>
+    <li>L and R channels within 2 dB of each other (stereo balance)</li>
+    <li>All zones 1–8 (8ZSA) or 1–4 (4ZSA) produce audio</li>
+    <li>MediaPlayer playback mode detected as MP1</li>
+</ul>
+
+<h4>MediaPlayer Stream Count (from productName.c):</h4>
+<table>
+    <tr><th>Device</th><th>streamMediaPlayerTxNum</th><th>streamFirstMediaPlayerTxNum</th></tr>
+    <tr><td>DM-NAX-8ZSA (DEVICE_DNA_8ZA)</td><td>8</td><td>0</td></tr>
+    <tr><td>DM-NAX-4ZSA (DEVICE_DNA_4ZSA)</td><td>5</td><td>5</td></tr>
+    <tr><td>DM-NAX-4ZSA-50W</td><td>5</td><td>5</td></tr>
+</table>
+</div>
+
+<!-- ==================== SECTION: Loudness ==================== -->
+<h2 id="test-loudness">10. Loudness Test</h2>
+
+<div class="card">
+<h3>Purpose</h3>
+<p>Verify loudness compensation boosts low frequencies when volume is reduced (Fletcher-Munson compensation).</p>
+
+<h4>Signal Flow:</h4>
+<div class="signal-chain"><span class="block">Tone 100Hz @ -20dB</span> <span class="arrow">→</span> <span class="block">Mixer</span> <span class="arrow">→</span> <span class="block">Volume (40%)</span> <span class="arrow">→</span> <span class="measure">[Loudness boost]</span> <span class="arrow">→</span> EQ <span class="arrow">→</span> <span class="measure">Amp (A1L)</span></div>
+
+<h4>Test Logic:</h4>
+<div class="signal-chain">1. Set volume to 40%, Loudness OFF → measure Amp → baseline
+2. Set volume to 40%, Loudness ON  → measure Amp → boosted
+3. Delta = boosted - baseline ≥ 1 dB</div>
+</div>
+
+<!-- ==================== SECTION: Night Mode ==================== -->
+<h2 id="test-night-mode">11. Night Mode Test</h2>
+
+<div class="card">
+<h3>Purpose</h3>
+<p>Verify night mode compresses dynamic range (reduces loud peaks). Levels should be monotonically reduced: High ≤ Medium ≤ Low ≤ Off.</p>
+
+<h4>Signal Flow:</h4>
+<div class="signal-chain"><span class="block">Tone 1kHz @ -6dB (hot signal)</span> <span class="arrow">→</span> <span class="block">Mixer</span> <span class="arrow">→</span> <span class="measure">[Night Mode compression]</span> <span class="arrow">→</span> AGC <span class="arrow">→</span> EQ <span class="arrow">→</span> <span class="measure">Amp (A1L)</span></div>
+
+<h4>Pass/Fail:</h4>
+<ul class="pass-fail">
+    <li>Level_Off ≥ Level_Low ≥ Level_Medium ≥ Level_High (monotonic)</li>
+    <li>Uses a hot signal (-6dB) to trigger compression</li>
+</ul>
+</div>
+
+<!-- ==================== SECTION: Crosstalk ==================== -->
+<h2 id="test-crosstalk">12. Crosstalk Test</h2>
+
+<div class="card">
+<h3>Purpose</h3>
+<p>Verify signal isolation between zones — signal on one output does not leak to other outputs.</p>
+
+<h4>Signal Flow:</h4>
+<div class="signal-chain"><span class="block">Tone</span> <span class="arrow">→</span> <span class="block">Mixer → ONE output only</span>         <span class="measure">Target: A{n}L has signal</span>
+                                              ALL other A{m}L: should be &lt; -80 dB</div>
+
+<h4>Pass/Fail:</h4>
+<ul class="pass-fail">
+    <li>Target output: signal present (&gt; -40 dB)</li>
+    <li>All other outputs: &lt; -80 dB (no leakage)</li>
+</ul>
+</div>
+
+<!-- ==================== SECTION: SNR ==================== -->
+<h2 id="test-snr">13. Signal-to-Noise Ratio Test</h2>
+
+<div class="card">
+<h3>Purpose</h3>
+<p>Measure noise floor and signal-to-noise ratio of each zone output.</p>
+
+<h4>Signal Flow:</h4>
+<div class="signal-chain">Step 1 — Noise floor:  No tone, mixer open → <span class="measure">Amp (A{n}L)</span> → should be &lt; -90 dB
+Step 2 — Signal:       Tone 1kHz @ -20dB → Mixer → <span class="measure">Amp (A{n}L)</span> → measure level
+SNR = Signal_level - Noise_floor → should be &gt; 70 dB</div>
+</div>
+
+<!-- ==================== SECTION: Input Compensation ==================== -->
+<h2 id="test-input-comp">14. Input Compensation Test</h2>
+
+<div class="card">
+<h3>Purpose</h3>
+<p>Verify input gain/compensation adjusts the input level before mixer routing.</p>
+
+<h4>Signal Flow:</h4>
+<div class="signal-chain"><span class="block">External Source</span> <span class="arrow">→</span> <span class="measure">[Input Gain (+5/-5 dB)]</span> <span class="arrow">→</span> <span class="block">Mixer</span> <span class="arrow">→</span> Zone <span class="arrow">→</span> <span class="measure">Amp (A1L)</span></div>
+
+<h4>DSP Commands:</h4>
+<div class="signal-chain"><span class="cmd">dsp gain {input_ch} {value}</span>     # Set input compensation
+<span class="cmd">dsp</span>                              # Read InputGain column + ducker_db level</div>
+
+<h4>Pass/Fail:</h4>
+<ul class="pass-fail">
+    <li>InputGain column matches CresNext setting</li>
+    <li>+5 dB gain vs -5 dB gain: spread ≥ 7 dB at ducker (pre-volume) measurement</li>
+</ul>
+</div>
+
+<!-- ==================== SECTION: Quick Reference ==================== -->
+<h2 id="quick-ref">15. Quick Reference: DSP Commands</h2>
+
+<div class="card">
+<table>
+    <tr><th>Command</th><th>Purpose</th><th>Example</th></tr>
+    <tr><td><code>dsp</code></td><td>Dump full audio state table</td><td><code>dsp</code></td></tr>
+    <tr><td><code>dsp tone &lt;ch&gt; &lt;freq&gt; &lt;gain&gt;</code></td><td>Start tone generator</td><td><code>dsp tone 0 1000 -20</code></td></tr>
+    <tr><td><code>dsp tone &lt;ch&gt; 0 0</code></td><td>Stop tone generator</td><td><code>dsp tone 0 0 0</code></td></tr>
+    <tr><td><code>dsp mix &lt;in&gt; &lt;out&gt; &lt;gain&gt;</code></td><td>Set mixer crosspoint</td><td><code>dsp mix 0 0 0</code> (ch0→out0 @ 0dB)</td></tr>
+    <tr><td><code>dsp mix &lt;in&gt; &lt;out&gt; off</code></td><td>Clear mixer crosspoint</td><td><code>dsp mix 0 0 off</code></td></tr>
+    <tr><td><code>dsp gain &lt;ch&gt; &lt;val&gt;</code></td><td>Set input compensation</td><td><code>dsp gain 0 5</code> (+5dB)</td></tr>
+    <tr><td><code>dsp agc &lt;ch&gt;</code></td><td>Read AGC state</td><td><code>dsp agc 0</code></td></tr>
+    <tr><td><code>imgupd engdbg</code></td><td>Enable engineering debug mode</td><td>Requires zip in /firmware/</td></tr>
+    <tr><td><code>ver -v</code></td><td>Show firmware info + Eng Debug Mode</td><td>Look for "Eng Debug Mode: True"</td></tr>
+</table>
+
+<h3>Signal Generator Channels by Device:</h3>
+<table>
+    <tr><th>Device</th><th>Zone Range</th><th>Sig Gen Channel</th><th>Name</th></tr>
+    <tr><td>4ZSA</td><td>All (1–4)</td><td>ch28</td><td>SIG</td></tr>
+    <tr><td>8ZSA</td><td>Zones 1–4</td><td>ch0</td><td>T1L</td></tr>
+    <tr><td>8ZSA</td><td>Zones 5–8</td><td>ch8</td><td>T2L</td></tr>
+    <tr><td>4ZSP</td><td>All (1–4)</td><td>ch0</td><td>T1L</td></tr>
+</table>
+
+<h3>Output Index Mapping:</h3>
+<table>
+    <tr><th>Zone</th><th>Left Output</th><th>Right Output</th><th>DSP Block (8ZSA)</th></tr>
+    <tr><td>1</td><td>out0</td><td>out1</td><td>Block 0</td></tr>
+    <tr><td>2</td><td>out2</td><td>out3</td><td>Block 0</td></tr>
+    <tr><td>3</td><td>out4</td><td>out5</td><td>Block 0</td></tr>
+    <tr><td>4</td><td>out6</td><td>out7</td><td>Block 0</td></tr>
+    <tr><td>5</td><td>out8</td><td>out9</td><td>Block 1</td></tr>
+    <tr><td>6</td><td>out10</td><td>out11</td><td>Block 1</td></tr>
+    <tr><td>7</td><td>out12</td><td>out13</td><td>Block 1</td></tr>
+    <tr><td>8</td><td>out14</td><td>out15</td><td>Block 1</td></tr>
+</table>
+
+<h3>Engineering Debug Mode Enable Flow:</h3>
+<div class="signal-chain">1. Locate engineering_debug.zip (e.g., /mnt/nightly/AM335x_dinap3/eng_dbg/)
+2. SFTP upload to device: <span class="cmd">put engineering_debug.zip /firmware/engineering_debug.zip</span>
+3. SSH command: <span class="cmd">imgupd engdbg</span>
+4. Wait for reboot/apply cycle
+5. Verify: <span class="cmd">ver -v</span> → should show <span class="measure">"Eng Debug Mode: True"</span>
+6. SSH to port 6022 now available (dropbear bash shell)
+7. Bash commands: curl, aplay, etc. for streaming tests</div>
+</div>
+
+<footer>
+    <p>Generated for DM-NAX DSP Test Suite | Last updated: May 2026</p>
+    <p>Devices: DM-NAX-4ZSA, DM-NAX-4ZSA-50W, DM-NAX-8ZSA, DM-NAX-4ZSP</p>
+</footer>
+
+<script>
+function switchDevice(device) {
+    document.querySelectorAll('#panel-4zsa, #panel-8zsa, #panel-4zsp').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-' + device).classList.add('active');
+    const tabs = document.querySelectorAll('.device-tabs')[0].querySelectorAll('.device-tab');
+    tabs.forEach(t => t.classList.remove('active'));
+    event.target.classList.add('active');
+}
+function switchBalanceDevice(id) {
+    document.querySelectorAll('#bal-4zsa, #bal-8zsa').forEach(p => p.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    const container = event.target.parentElement;
+    container.querySelectorAll('.device-tab').forEach(t => t.classList.remove('active'));
+    event.target.classList.add('active');
+}
+function switchStreamDevice(id) {
+    document.querySelectorAll('#str-4zsa, #str-8zsa').forEach(p => p.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    const container = event.target.parentElement;
+    container.querySelectorAll('.device-tab').forEach(t => t.classList.remove('active'));
+    event.target.classList.add('active');
+}
+</script>
+</body>
+</html>
