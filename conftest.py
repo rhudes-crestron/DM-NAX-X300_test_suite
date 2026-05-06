@@ -248,27 +248,37 @@ def module_reset(dsp, device_cfg, request):
 def _do_reset(dsp, device_cfg):
     """Reset signal path and all zone properties to baseline defaults.
 
-    Sends one DSP command per SSH call (avoids CLI parsing/length limits),
-    then resets zone audio properties via CresNext REST API.
+    On fw21 (4ZSA): sends DSP console commands to stop tones and clear mixer
+    crosspoints, then resets zone audio properties via CresNext REST API.
+
+    On fw42 (8ZSA/4ZSP): does NOT use console mixer commands because they
+    destroy DspAudioCtl's internal mixer state.  Instead, relies on
+    AvMatrixRouting REST to (re-)program mixer and zone-chain processing.
+    To force DspAudioCtl to re-program (even if already set to the same
+    source), first clears the route to "None" then sets the desired input.
     """
     sig_ch = device_cfg["signal_generator"]["channel"]
     num_outputs = device_cfg.get("mixer_outputs", 10)
+    model = str(device_cfg.get("model", "")).upper()
 
-    # 1. Build reset command list (tones + all crosspoints).
-    cmds = []
-    # Stop tones on all physical channels + signal generator
+    # 1. Stop tones on all physical channels + signal generator
     for ch in list(range(8)) + [sig_ch]:
-        cmds.append(f"dsp tone {ch} 0 0")
-    # Clear mixer crosspoints: physical channels + signal generator → all outputs
-    for ch in list(range(8)) + [sig_ch]:
-        for out in range(num_outputs):
-            cmds.append(f"dsp mix {ch} {out} -200")
-    # Some device CLIs reject ';' command chaining; execute one command per call.
-    for idx, cmd in enumerate(cmds):
         try:
-            dsp.ssh.execute(cmd, timeout=30, trace_source="RESET")
+            dsp.ssh.execute(f"dsp tone {ch} 0 0", timeout=30, trace_source="RESET")
         except Exception as e:
-            logger.warning("DSP reset command failed at index %d cmd='%s': %s", idx, cmd, e)
+            logger.warning("DSP tone stop failed ch=%d: %s", ch, e)
+
+    # 2. Clear mixer crosspoints (fw21 only — console mixer is safe there)
+    if model not in {"8ZSA", "4ZSP"}:
+        cmds = []
+        for ch in list(range(8)) + [sig_ch]:
+            for out in range(num_outputs):
+                cmds.append(f"dsp mix {ch} {out} -200")
+        for idx, cmd in enumerate(cmds):
+            try:
+                dsp.ssh.execute(cmd, timeout=30, trace_source="RESET")
+            except Exception as e:
+                logger.warning("DSP reset command failed at index %d cmd='%s': %s", idx, cmd, e)
 
     # Reset input gains through syntax-fallback helper to avoid fw/report mismatches.
     for ch in range(8):
@@ -305,10 +315,20 @@ def _do_reset(dsp, device_cfg):
         # (test_route_zones_to_streaming).
         if device_cfg.get("dsp_fw_version", 21) >= 42:
             tone_input = device_cfg.get("dsp_tone_input", "Input01")
-            model = str(device_cfg.get("model", "")).upper()
             for zone in zones:
                 try:
                     if model in {"8ZSA", "4ZSP"}:
+                        # Force DspAudioCtl to re-program the mixer by first
+                        # routing to a different valid source then back.
+                        # "None" is ignored by the device; we need a real input
+                        # to trigger a genuine route change.
+                        toggle_input = "Input02" if tone_input != "Input02" else "Input03"
+                        try:
+                            dsp.cn.set_zone_source(zone, toggle_input)
+                        except Exception:
+                            pass
+                        import time as _time
+                        _time.sleep(0.2)
                         try:
                             dsp.cn.set_zone_sources_streamrouting({int(zone): tone_input})
                         except Exception:

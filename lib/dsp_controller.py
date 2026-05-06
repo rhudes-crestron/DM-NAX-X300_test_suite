@@ -130,8 +130,10 @@ class DSPController:
     def _set_tone_source_for_zone(self, zone):
         """Route a zone to tone input using the best CresNext path for platform mode.
 
-        8ZSA/4ZSP fw42 devices in MP1 often require the StreamRoutings-style
-        route path. Fall back to per-zone AvMatrixRouting if unsupported.
+        8ZSA/4ZSP fw42 devices require AvMatrixRouting to activate zone-chain
+        processing (PEQ, Bass/Treble).  To force DspAudioCtl to actually
+        re-program (even if already set to the same source), we first route
+        to a different valid source then back to the desired input.
 
         IMPORTANT: Setting AvMatrixRouting triggers HandleNewRoute which resets
         the zone volume to default (~30%).  Callers MUST set Volume=800 AFTER
@@ -142,14 +144,20 @@ class DSPController:
             return
 
         tone_input = self.cfg.get("dsp_tone_input", "Input01")
-        model = str(self.cfg.get("model", "")).upper()
         route_settle = self.settings.get("route_settle_time_s", 0.5)
 
-        if model in {"8ZSA", "4ZSP"}:
+        if self._model in self._FW42_MODELS:
+            # Force a genuine route change by toggling to a different valid
+            # source first.  "None" is ignored by DspAudioCtl; we need a real
+            # input like "Input02" (physically silent if nothing connected).
+            toggle_input = "Input02" if tone_input != "Input02" else "Input03"
+            try:
+                self.cn.set_zone_source(zone, toggle_input)
+            except Exception:
+                pass
+            time.sleep(0.2)
             try:
                 self.cn.set_zone_sources_streamrouting({int(zone): tone_input})
-                time.sleep(route_settle)
-                return
             except Exception as e:
                 logger.warning(
                     "StreamRoutings path failed for Zone%d -> %s (%s); falling back",
@@ -157,6 +165,9 @@ class DSPController:
                     tone_input,
                     e,
                 )
+                self.cn.set_zone_source(zone, tone_input)
+            time.sleep(route_settle)
+            return
 
         self.cn.set_zone_source(zone, tone_input)
         time.sleep(route_settle)
@@ -178,10 +189,11 @@ class DSPController:
                 max_zone = self.cfg.get("zones", 4)
                 if 1 <= zone <= max_zone:
                     self._set_tone_source_for_zone(zone)
-            # AvMatrixRouting handles mixer routing + zone-chain activation
-            # internally via DspAudioCtl.  Console mixer commands would
-            # override the programmed route and bypass zone processing.
-            return
+            # Program the specific mixer crosspoint via MIXER_CFG_CH_OUT.
+            # AvMatrixRouting activates zone-chain processing; mixout delivers
+            # the signal.  Do NOT clear other outputs (would destroy their state).
+            sig_ch = self.sig_ch_for_output(output_ch)
+            return self.set_mixer_output(output_ch, sig_ch, gain_db)
         sig_ch = self.sig_ch_for_output(output_ch)
         return self.set_mixer(sig_ch, output_ch, gain_db)
 
