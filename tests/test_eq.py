@@ -118,7 +118,7 @@ class TestEQ:
         if output_name not in device_cfg.get("amp_outputs", []):
             pytest.skip(f"{output_name} not in amp_outputs for {device_cfg['model']}")
 
-        sig_ch = dsp.sig_ch  # Always use primary sig channel for zone-chain tests
+        sig_ch = dsp.sig_ch_for_output(output_idx)
         dsp.start_tone(sig_ch, freq_hz, tone_gain_db)
         dsp.route_sig_to_output(output_idx)
         cn.set_zone_audio(zone, Volume=800)

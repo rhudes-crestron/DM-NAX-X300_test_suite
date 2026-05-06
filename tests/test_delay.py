@@ -51,13 +51,14 @@ class TestDelay:
     def _setup_zone(self, dsp, device_cfg, zone):
         """Route signal generator to the zone's left amp output."""
         out_idx, _ = self._output_info(zone)
-        dsp.start_tone(dsp.sig_ch, dsp.settings["default_tone_freq_hz"],
+        sig_ch = dsp.sig_ch_for_output(out_idx)
+        dsp.start_tone(sig_ch, dsp.settings["default_tone_freq_hz"],
                        dsp.settings["default_tone_gain_db"])
         if device_cfg.get("dsp_fw_version", 21) >= 42:
             if dsp.cn is not None:
                 dsp._set_tone_source_for_zone(zone)
             dsp.clear_all_sig_routes()
-        dsp.set_mixer(dsp.sig_ch, out_idx, 0)
+        dsp.set_mixer(sig_ch, out_idx, 0)
 
     def _clear_zone_route(self, dsp, device_cfg, zone):
         """Clear signal route to a zone output so signal-detected can drop."""
@@ -146,20 +147,22 @@ class TestDelay:
 
         out_idx, _ = self._output_info(zone)
 
+        sig_ch = dsp.sig_ch_for_output(out_idx)
+
         def _measure_arrival(delay_ms):
             dsp.set_zone_delay(zone, delay_ms)
             cresnext.set_zone_audio(zone, Volume=800, IsMuted=False)
             self._clear_zone_route(dsp, device_cfg, zone)
-            dsp.stop_tone(dsp.sig_ch)
+            dsp.stop_tone(sig_ch)
             self._wait_signal_detected(dsp, zone, expected=False, timeout_s=1.5, poll_s=0.03)
 
-            dsp.start_tone(dsp.sig_ch, dsp.settings["default_tone_freq_hz"],
+            dsp.start_tone(sig_ch, dsp.settings["default_tone_freq_hz"],
                            dsp.settings["default_tone_gain_db"])
             if device_cfg.get("dsp_fw_version", 21) >= 42:
                 if dsp.cn is not None:
                     dsp._set_tone_source_for_zone(zone)
                 dsp.clear_all_sig_routes()
-            dsp.set_mixer(dsp.sig_ch, out_idx, 0)
+            dsp.set_mixer(sig_ch, out_idx, 0)
 
             t = self._time_to_signal_detected(dsp, zone, timeout_s=3.0, poll_s=0.01)
 

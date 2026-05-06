@@ -27,7 +27,8 @@ class TestVolume:
     def _setup_signal(self, dsp, device_cfg, zone):
         """Inject signal generator tone and route to a zone's left output."""
         output_idx, _ = self._output_info(zone)
-        dsp.start_tone(dsp.sig_ch, dsp.settings["default_tone_freq_hz"],
+        sig_ch = dsp.sig_ch_for_output(output_idx)
+        dsp.start_tone(sig_ch, dsp.settings["default_tone_freq_hz"],
                        dsp.settings["default_tone_gain_db"])
         dsp.route_sig_to_output(output_idx)
 

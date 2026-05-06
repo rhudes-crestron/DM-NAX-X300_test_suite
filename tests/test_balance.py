@@ -61,15 +61,16 @@ class TestBalance:
         fw21: tone on dsp.sig_ch (ch28=SIG), mixer routes to both L and R outputs.
         """
         left_idx, right_idx, _, _ = self._output_info(zone)
+        sig_ch = dsp.sig_ch_for_output(left_idx)
 
-        dsp.start_tone(dsp.sig_ch, dsp.settings["default_tone_freq_hz"],
+        dsp.start_tone(sig_ch, dsp.settings["default_tone_freq_hz"],
                        dsp.settings["default_tone_gain_db"])
         if device_cfg.get("dsp_fw_version", 21) >= 42:
             if dsp.cn is not None:
                 dsp._set_tone_source_for_zone(zone)
             dsp.clear_all_sig_routes()
-        dsp.set_mixer(dsp.sig_ch, left_idx, 0)
-        dsp.set_mixer(dsp.sig_ch, right_idx, 0)
+        dsp.set_mixer(sig_ch, left_idx, 0)
+        dsp.set_mixer(sig_ch, right_idx, 0)
 
     def _measure_lr(self, dsp, zone, settle_s):
         """Read L/R output levels for the zone from a single DSP snapshot."""
