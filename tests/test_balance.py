@@ -89,12 +89,20 @@ class TestBalance:
             dsp.set_mixer(sig_ch, right_idx, 0)
 
     def _measure_lr(self, dsp, zone, settle_s):
-        """Read L/R output levels for the zone from a single DSP snapshot."""
+        """Read L/R output levels for the zone from a single DSP snapshot.
+
+        Retries once if the expected outputs are missing (SSH truncation on
+        dual-block 8ZSA sometimes omits the second DSP block).
+        """
         time.sleep(settle_s)
         _, _, left_name, right_name = self._output_info(zone)
-        state = dsp.read_dsp_state()
-        out_l = state.outputs.get(left_name)
-        out_r = state.outputs.get(right_name)
+        for attempt in range(2):
+            state = dsp.read_dsp_state()
+            out_l = state.outputs.get(left_name)
+            out_r = state.outputs.get(right_name)
+            if out_l and out_r:
+                return out_l.output_db, out_r.output_db
+            time.sleep(0.5)
         assert out_l and out_r, f"{left_name}/{right_name} outputs not found in DSP state"
         return out_l.output_db, out_r.output_db
 
