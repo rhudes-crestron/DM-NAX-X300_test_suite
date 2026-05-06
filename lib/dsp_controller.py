@@ -17,12 +17,17 @@ logger = logging.getLogger(__name__)
 class DSPController:
     """Controls the DSP on a DM-NAX device via SSH console and CresNext REST API."""
 
+    # Models that use the fw42 dual-SHARC platform with separate 8x8 mixer
+    # blocks and require MIXER_CFG_CH_OUT to activate zone-chain processing.
+    _FW42_MODELS = {"8ZSA", "4ZSP"}
+
     def __init__(self, ssh, device_cfg, test_settings, cresnext=None):
         self.ssh = ssh
         self.cfg = device_cfg
         self.settings = test_settings
         self.sig_ch = device_cfg["signal_generator"]["channel"]
         self.cn = cresnext  # CresNextClient for zone property control
+        self._model = str(device_cfg.get("model", "")).upper()
 
     # ------------------------------------------------------------------
     # Signal generator
@@ -67,28 +72,60 @@ class DSPController:
         """Clear a mixer crosspoint by setting to -inf."""
         return self.set_mixer(input_ch, output_ch, -200)
 
+    def set_mixer_output(self, output_ch, active_input, gain_db=0):
+        """Program a full output channel via MIXER_CFG_CH_OUT (dsp mixout).
+
+        This sends AUDIO_DSP_CMD_MIXER_CFG_CH_OUT which activates the entire
+        output processing chain (PEQ, Bass/Treble, Volume, Limiter) on fw42.
+        Unlike 'dsp mix' (MIXER_CFG_NODE) which only sets a single crosspoint,
+        this command programs all input gains for the output and enables
+        zone-chain processing.
+
+        active_input is the input channel index *within the DSP block* (0-7).
+        For dual-block devices, dsp_test handles block selection automatically
+        based on output_ch (0-7 = block 0, 8-15 = block 1).
+        """
+        num_inputs = 8  # MAXIMUM_CHANNEL_COUNT per DSP block
+        # Build gain list: active_input gets gain_db, all others muted
+        gains = ["-200"] * num_inputs
+        # active_input may be >=8 for block-1 (e.g. ch8 = T2L); remap to block-local index
+        local_input = active_input % num_inputs
+        gains[local_input] = str(gain_db)
+        gains_str = " ".join(gains)
+        cmd = f"dsp mixout {output_ch} {gains_str}"
+        out = self.ssh.execute(cmd, timeout=15)
+        logger.info("MixerOutput: out=%d active_in=%d (local=%d) @ %s dB",
+                    output_ch, active_input, local_input, gain_db)
+        return out
+
+    def mute_mixer_output(self, output_ch):
+        """Mute all inputs to a single output via MIXER_CFG_CH_OUT."""
+        num_inputs = 8
+        gains_str = " ".join(["-200"] * num_inputs)
+        cmd = f"dsp mixout {output_ch} {gains_str}"
+        return self.ssh.execute(cmd, timeout=15)
+
     def clear_all_sig_routes(self):
-        """Clear the signal generator from ALL mixer outputs.
+        """Clear signal generator from ALL mixer outputs.
 
-        On fw42 devices (4ZSP/8ZSA), the signal generator channel is a
-        physical input (ch 0 = T1L) that can bleed to all outputs through
-        default routing.  Clearing every crosspoint for this channel
-        guarantees isolation before routing to a single target.
+        On fw42 devices, uses 'dsp mixout' (MIXER_CFG_CH_OUT) per output to
+        mute all inputs.  This avoids the cross-block addressing bug where
+        'dsp mix 8 <out> -200' incorrectly targets DSP block 1 and can hang.
 
-        On dual-block devices (8ZSA) also clear the block-1 signal generator.
+        On fw21 devices, uses per-node 'dsp mix' which is safe (single block).
         """
         num_outputs = self.cfg.get("mixer_outputs", 10)
-        cmds = [f"dsp mix {self.sig_ch} {out} -200" for out in range(num_outputs)]
-        for cmd in cmds:
-            self.ssh.execute(cmd, timeout=10)
-        logger.info("Cleared all %d sig routes for ch %d", num_outputs, self.sig_ch)
-        # Also clear DSP block 1 signal generator if present
-        dsp1 = self.cfg.get("signal_generator_dsp1")
-        if dsp1:
-            sig_ch1 = dsp1["channel"]
+
+        if self._model in self._FW42_MODELS:
+            # Use per-output MIXER_CFG_CH_OUT — safe for dual-block devices
             for out in range(num_outputs):
-                self.ssh.execute(f"dsp mix {sig_ch1} {out} -200", timeout=10)
-            logger.info("Cleared all %d sig routes for ch %d (dsp1)", num_outputs, sig_ch1)
+                self.mute_mixer_output(out)
+            logger.info("Cleared all %d outputs via mixout (fw42)", num_outputs)
+        else:
+            # fw21: single block, per-node clear is fine
+            for out in range(num_outputs):
+                self.ssh.execute(f"dsp mix {self.sig_ch} {out} -200", timeout=10)
+            logger.info("Cleared all %d sig routes for ch %d", num_outputs, self.sig_ch)
 
     def _set_tone_source_for_zone(self, zone):
         """Route a zone to tone input using the best CresNext path for platform mode.
@@ -135,13 +172,16 @@ class DSPController:
         On fw21 devices, routes via the DSP mixer crosspoint which feeds
         into the zone chain on that firmware architecture.
         """
-        if self.cfg.get("dsp_fw_version", 21) >= 42:
+        if self._model in self._FW42_MODELS:
             if self.cn is not None:
                 zone = self.zone_for_output(output_ch)
                 max_zone = self.cfg.get("zones", 4)
                 if 1 <= zone <= max_zone:
                     self._set_tone_source_for_zone(zone)
             self.clear_all_sig_routes()
+            # Use MIXER_CFG_CH_OUT to activate the output zone chain
+            sig_ch = self.sig_ch_for_output(output_ch)
+            return self.set_mixer_output(output_ch, sig_ch, gain_db)
         sig_ch = self.sig_ch_for_output(output_ch)
         return self.set_mixer(sig_ch, output_ch, gain_db)
 

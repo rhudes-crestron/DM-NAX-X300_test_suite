@@ -55,12 +55,17 @@ class TestBassTreble:
         fw21: tone on dsp.sig_ch (ch28=SIG), routed via dsp mix into zone chain.
         """
         out_idx, _ = self._output_info(zone)
-        dsp.start_tone(dsp.sig_ch, freq_hz, -20)
-        if device_cfg.get("dsp_fw_version", 21) >= 42:
+        sig_ch = dsp.sig_ch_for_output(out_idx)
+        dsp.start_tone(sig_ch, freq_hz, -20)
+        model = str(device_cfg.get("model", "")).upper()
+        if model in {"8ZSA", "4ZSP"}:
             if dsp.cn is not None:
                 dsp._set_tone_source_for_zone(zone)
             dsp.clear_all_sig_routes()
-        dsp.set_mixer(dsp.sig_ch, out_idx, 0)
+            # Use MIXER_CFG_CH_OUT to activate zone-chain processing
+            dsp.set_mixer_output(out_idx, sig_ch, 0)
+        else:
+            dsp.set_mixer(sig_ch, out_idx, 0)
 
     @pytest.mark.parametrize("zone", ALL_ZONES)
     @pytest.mark.parametrize("bass_value,direction", [
