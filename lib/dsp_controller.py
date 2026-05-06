@@ -455,17 +455,15 @@ class DSPController:
         """Read and parse the full DSP state table."""
         raw = self.ssh.execute("dsp")
         state = parse_dsp_output(raw)
-        # Log one row per output channel so the HTML trace viewer shows a
-        # readable table matching the DSP terminal "Output dB" columns.
+        # Log a compact single-line summary of all output levels.
         if state.outputs:
-            log_event("SSH", f"{'Name':<8}  {'Output dB':>10}  {'Ducker dB':>10}")
-            log_event("SSH", f"{'--------':<8}  {'----------':>10}  {'----------':>10}")
+            parts = []
             for name, out in sorted(state.outputs.items()):
                 if name.startswith("Z"):   # skip fw42 zone-name aliases (Z1L…)
                     continue
-                o_db = f"{out.output_db:>10.1f}" if out.output_db > float('-inf') else f"{'  -inf':>10}"
-                d_db = f"{out.ducker_db:>10.1f}" if out.ducker_db > float('-inf') else f"{'  -inf':>10}"
-                log_event("SSH", f"{name:<8}  {o_db}  {d_db}")
+                o_db = f"{out.output_db:.1f}" if out.output_db > float('-inf') else "-inf"
+                parts.append(f"{name}={o_db}")
+            log_event("SSH", " | ".join(parts))
         return state
 
     def read_mixer_state(self):
