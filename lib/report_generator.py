@@ -92,7 +92,7 @@ def _get_category_paths(model="4ZSA"):
             (f"SSH: dsp tone {sg} @freq,-20", "input"),
             (f"SSH: dsp mix {sg}\u2192{out1}", "process"),
             ("DSP processing (flat)", "process"),
-            ("SSH: dsp \u2192 output_db per freq", "measure"),
+            ("SSH: dsp \u2192 ducker_db per freq", "measure"),
             ("Assert \u00b10.5 dB flatness", "verify"),
         ],
         "Signal To Noise": [
@@ -121,14 +121,14 @@ def _get_category_paths(model="4ZSA"):
             (f"SSH: dsp tone {sg} @var gain", "input"),
             (f"SSH: dsp mix {sg}\u2192{out1}", "process"),
             ("DSP processing (linear)", "process"),
-            ("SSH: dsp \u2192 output_db per level", "measure"),
+            ("SSH: dsp \u2192 ducker_db per level", "measure"),
             ("Assert \u0394 output = \u0394 input \u00b11 dB", "verify"),
         ],
         "Signal Routing": [
             (f"SSH: dsp tone {sg}", "input"),
             ("SSH: dsp mix N\u2192out", "highlight"),
             ("DSP processing", "process"),
-            ("SSH: dsp \u2192 ducker_db", "measure"),
+            ("SSH: dsp \u2192 output_db", "measure"),
             ("Assert level > floor", "verify"),
         ],
         "Volume": [
