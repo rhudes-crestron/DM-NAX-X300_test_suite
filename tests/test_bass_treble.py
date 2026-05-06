@@ -61,9 +61,11 @@ class TestBassTreble:
         if model in {"8ZSA", "4ZSP"}:
             if dsp.cn is not None:
                 dsp._set_tone_source_for_zone(zone)
-            # AvMatrixRouting activates zone-chain; mixout delivers signal.
-            # Do NOT clear all outputs (would destroy other zones' state).
-            dsp.set_mixer_output(out_idx, sig_ch, 0)
+            # Use MIXER_CFG_NODE (dsp mix) — NOT MIXER_CFG_CH_OUT (dsp mixout).
+            # MIXER_CFG_CH_OUT resets output processing on the SHARC.
+            # AvMatrixRouting activates zone-chain; dsp mix just delivers signal.
+            dsp.clear_all_sig_routes()
+            dsp.set_mixer(sig_ch, out_idx, 0)
         else:
             dsp.set_mixer(sig_ch, out_idx, 0)
 

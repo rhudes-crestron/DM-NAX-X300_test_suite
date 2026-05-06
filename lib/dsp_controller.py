@@ -108,19 +108,34 @@ class DSPController:
     def clear_all_sig_routes(self):
         """Clear signal generator from ALL mixer outputs.
 
-        On fw42 devices, uses 'dsp mixout' (MIXER_CFG_CH_OUT) per output to
-        mute all inputs.  This avoids the cross-block addressing bug where
-        'dsp mix 8 <out> -200' incorrectly targets DSP block 1 and can hang.
+        On fw42 dual-block devices (8ZSA/4ZSP), uses per-node 'dsp mix'
+        (MIXER_CFG_NODE) to clear only same-block crosspoints for each
+        signal generator.  Cross-block clears (e.g. dsp mix 8 2 -200) are
+        invalid and can hang the SPI bus.
+
+        IMPORTANT: Do NOT use 'dsp mixout' (MIXER_CFG_CH_OUT) here — it
+        resets the output channel's processing state on the SHARC firmware,
+        wiping zone-chain (EQ/Bass/Treble) configuration.
 
         On fw21 devices, uses per-node 'dsp mix' which is safe (single block).
         """
         num_outputs = self.cfg.get("mixer_outputs", 10)
 
         if self._model in self._FW42_MODELS:
-            # Use per-output MIXER_CFG_CH_OUT — safe for dual-block devices
-            for out in range(num_outputs):
-                self.mute_mixer_output(out)
-            logger.info("Cleared all %d outputs via mixout (fw42)", num_outputs)
+            # Block 0: sig_ch routes to outputs 0-7 only
+            block_size = 8
+            for out in range(min(block_size, num_outputs)):
+                self.ssh.execute(f"dsp mix {self.sig_ch} {out} -200", timeout=10)
+            logger.info("Cleared sig_ch %d -> outputs 0-%d (block 0)",
+                        self.sig_ch, min(block_size, num_outputs) - 1)
+            # Block 1: if dual-block, clear dsp1 sig_ch to outputs 8-15
+            dsp1 = self.cfg.get("signal_generator_dsp1")
+            if dsp1 and num_outputs > block_size:
+                sig_ch1 = dsp1["channel"]
+                for out in range(block_size, num_outputs):
+                    self.ssh.execute(f"dsp mix {sig_ch1} {out} -200", timeout=10)
+                logger.info("Cleared sig_ch %d -> outputs %d-%d (block 1)",
+                            sig_ch1, block_size, num_outputs - 1)
         else:
             # fw21: single block, per-node clear is fine
             for out in range(num_outputs):
@@ -189,11 +204,14 @@ class DSPController:
                 max_zone = self.cfg.get("zones", 4)
                 if 1 <= zone <= max_zone:
                     self._set_tone_source_for_zone(zone)
-            # Program the specific mixer crosspoint via MIXER_CFG_CH_OUT.
-            # AvMatrixRouting activates zone-chain processing; mixout delivers
-            # the signal.  Do NOT clear other outputs (would destroy their state).
+            # Use MIXER_CFG_NODE (dsp mix) — NOT MIXER_CFG_CH_OUT (dsp mixout).
+            # MIXER_CFG_CH_OUT resets the output processing state on the SHARC,
+            # wiping zone-chain (EQ/Bass/Treble) configuration.
+            # MIXER_CFG_NODE sets a single crosspoint without disturbing output
+            # processing — AvMatrixRouting activates zone-chain separately.
+            self.clear_all_sig_routes()
             sig_ch = self.sig_ch_for_output(output_ch)
-            return self.set_mixer_output(output_ch, sig_ch, gain_db)
+            return self.set_mixer(sig_ch, output_ch, gain_db)
         sig_ch = self.sig_ch_for_output(output_ch)
         return self.set_mixer(sig_ch, output_ch, gain_db)
 
