@@ -103,12 +103,27 @@ def _audio_url(host_ip, port, freq_hz):
     return f"http://{host_ip}:{port}/{tone_filename(freq_hz)}"
 
 
-def _streaming_inputs_for_zone(zone_num):
-    """Return (left, right) DSP mux input names for streaming zone.
+def _streaming_inputs_for_zone(zone_num, device_cfg=None):
+    """Return (left, right) DSP measurement point names for streaming zone.
 
-    Streaming audio lands on M{n}L / M{n}R where n = zone number.
+    4ZSA (fw21): Streaming audio lands on M{n}L / M{n}R mux inputs.
+    8ZSA (fw42): There are no M{n} mux inputs in the DSP table;
+                 streaming audio is measured at the amp outputs A{n}L / A{n}R.
     """
+    if device_cfg and device_cfg.get("dsp_fw_version", 21) >= 42:
+        return f"A{zone_num}L", f"A{zone_num}R"
     return f"M{zone_num}L", f"M{zone_num}R"
+
+
+def _measure_streaming_level(dsp, name, device_cfg, settle_time=1.0):
+    """Measure streaming level at the appropriate DSP point.
+
+    4ZSA: measure_input_level (M{n}L mux input, pre-DSP)
+    8ZSA: measure_output_level (A{n}L amp output, post-DSP zone chain)
+    """
+    if device_cfg.get("dsp_fw_version", 21) >= 42:
+        return dsp.measure_output_level(name, settle_time=settle_time)
+    return dsp.measure_input_level(name, settle_time=settle_time)
 
 
 def _resolve_stream_audio_source(device_cfg, zone_num, default_input, mode):
@@ -228,7 +243,7 @@ class TestStreamingLevels:
 
     @pytest.mark.parametrize(
         "zone_num",
-        [1, 2, 3, 4],   # Updated dynamically in conftest based on device
+        list(range(1, 9)),  # conftest deselects zones outside --zone-mode
     )
     def test_zone_output_level(self, dsp, device_cfg, streaming,
                                audio_file_server, cresnext, zone_num):
@@ -239,7 +254,7 @@ class TestStreamingLevels:
 
         zcfg = zones[zone_num]
         freq = zcfg["tone_hz"]
-        left, right = _streaming_inputs_for_zone(zone_num)
+        left, right = _streaming_inputs_for_zone(zone_num, device_cfg)
 
         # Ensure route and volume are set
         input_name = _resolve_stream_audio_source(device_cfg, zone_num, zcfg["input"], streaming.mode)
@@ -256,9 +271,9 @@ class TestStreamingLevels:
             url = _audio_url(host_ip, srv_port, freq)
             player.start_streaming(url, settle_s=PLAY_SETTLE_S)
 
-        # Measure input levels at the DSP mux inputs (M1-M4)
-        level_l = dsp.measure_input_level(left, settle_time=2.0)
-        level_r = dsp.measure_input_level(right, settle_time=0.5)
+        # Measure levels at the appropriate DSP point
+        level_l = _measure_streaming_level(dsp, left, device_cfg, settle_time=2.0)
+        level_r = _measure_streaming_level(dsp, right, device_cfg, settle_time=0.5)
 
         logger.info(
             "Zone %d (%d Hz): L=%.2f dB, R=%.2f dB (expected %.1f to %.1f)",
@@ -289,7 +304,7 @@ class TestStreamingSignalPresence:
       4. CresNext IsSignalClipping (must NOT be True)
     """
 
-    @pytest.mark.parametrize("zone_num", [1, 2, 3, 4])
+    @pytest.mark.parametrize("zone_num", list(range(1, 9)))
     def test_signal_present_while_playing(self, cresnext, dsp, device_cfg,
                                           streaming, audio_file_server,
                                           zone_num):
@@ -305,8 +320,8 @@ class TestStreamingSignalPresence:
         )
 
         # 2. DSP mux input must show signal
-        left, _ = _streaming_inputs_for_zone(zone_num)
-        level = dsp.measure_input_level(left, settle_time=1.0)
+        left, _ = _streaming_inputs_for_zone(zone_num, device_cfg)
+        level = _measure_streaming_level(dsp, left, device_cfg, settle_time=1.0)
         assert level > SILENCE_FLOOR_DB, (
             f"Zone {zone_num}: DSP mux {left} level {level:.2f} dB "
             f"below silence floor ({SILENCE_FLOOR_DB} dB)"
@@ -334,7 +349,7 @@ class TestStreamingSignalPresence:
 class TestStreamingIsolation:
     """Phase 5: Verify per-zone isolation — each zone has independent signal."""
 
-    @pytest.mark.parametrize("zone_num", [1, 2, 3, 4])
+    @pytest.mark.parametrize("zone_num", list(range(1, 9)))
     def test_zone_isolation(self, dsp, device_cfg, streaming,
                             audio_file_server, cresnext, zone_num):
         """Each zone has independent signal on its own DSP mux input."""
@@ -343,9 +358,9 @@ class TestStreamingIsolation:
             pytest.skip(f"Zone {zone_num} not in streaming config")
 
         # Verify target zone has signal
-        left, right = _streaming_inputs_for_zone(zone_num)
-        level_l = dsp.measure_input_level(left, settle_time=1.0)
-        level_r = dsp.measure_input_level(right, settle_time=0.5)
+        left, right = _streaming_inputs_for_zone(zone_num, device_cfg)
+        level_l = _measure_streaming_level(dsp, left, device_cfg, settle_time=1.0)
+        level_r = _measure_streaming_level(dsp, right, device_cfg, settle_time=0.5)
 
         logger.info(
             "Zone %d isolation: L=%.2f dB, R=%.2f dB",
@@ -380,11 +395,11 @@ class TestStreamingCleanup:
         time.sleep(STOP_SETTLE_S)
 
     def test_silence_after_stop(self, dsp, device_cfg):
-        """All streaming mux inputs must be silent after streaming stops."""
+        """All streaming measurement points must be silent after streaming stops."""
         zones = device_cfg.get("selected_zones", list(range(1, device_cfg.get("zones", 4) + 1)))
         for z in zones:
-            left, right = _streaming_inputs_for_zone(z)
-            level_l = dsp.measure_input_level(left, settle_time=1.0)
+            left, right = _streaming_inputs_for_zone(z, device_cfg)
+            level_l = _measure_streaming_level(dsp, left, device_cfg, settle_time=1.0)
             assert level_l < SILENCE_FLOOR_DB, (
                 f"Zone {z} {left} still has signal after stop: {level_l:.2f} dB"
             )
@@ -401,8 +416,8 @@ class TestStreamingCleanup:
             )
 
             # DSP mux should be silent
-            left, _ = _streaming_inputs_for_zone(zone_num)
-            level = dsp.measure_input_level(left, settle_time=1.0)
+            left, _ = _streaming_inputs_for_zone(zone_num, device_cfg)
+            level = _measure_streaming_level(dsp, left, device_cfg, settle_time=1.0)
             assert level < SILENCE_FLOOR_DB, (
                 f"Zone {zone_num}: DSP mux {left} still has signal "
                 f"({level:.2f} dB) after stop"
