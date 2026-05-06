@@ -56,21 +56,37 @@ class TestBalance:
     def _setup_zone(self, dsp, device_cfg, zone):
         """Route signal generator to the zone's L+R amp outputs.
 
-        fw42: AvMatrixRouting activates zone-chain processing for Input01,
-              then mixer delivers the tone to both L and R outputs.
+        fw42 Balance architecture:
+          Balance is applied to each INPUT channel's level BEFORE the mixer.
+          If we route ch0→out0 AND ch0→out1 (same source to both), Balance
+          on ch1 is irrelevant (ch1 has no signal).  To make Balance testable,
+          we start a tone on BOTH the L and R input channels and route each
+          to its own output: chN→outN, chN+1→outN+1.  Then Balance=-500
+          attenuates the R input level to -inf, silencing the R output.
+
         fw21: tone on dsp.sig_ch (ch28=SIG), mixer routes to both L and R outputs.
+              Balance on fw21 is applied in the output zone chain (post-mixer).
         """
         left_idx, right_idx, _, _ = self._output_info(zone)
         sig_ch = dsp.sig_ch_for_output(left_idx)
 
-        dsp.start_tone(sig_ch, dsp.settings["default_tone_freq_hz"],
-                       dsp.settings["default_tone_gain_db"])
         if device_cfg.get("dsp_fw_version", 21) >= 42:
+            # Start tone on BOTH L and R input channels for this zone
+            dsp.start_tone(left_idx, dsp.settings["default_tone_freq_hz"],
+                           dsp.settings["default_tone_gain_db"])
+            dsp.start_tone(right_idx, dsp.settings["default_tone_freq_hz"],
+                           dsp.settings["default_tone_gain_db"])
             if dsp.cn is not None:
                 dsp._set_tone_source_for_zone(zone)
             dsp.clear_all_sig_routes()
-        dsp.set_mixer(sig_ch, left_idx, 0)
-        dsp.set_mixer(sig_ch, right_idx, 0)
+            # Route each input to its own output (1:1 mapping)
+            dsp.set_mixer(left_idx, left_idx, 0)
+            dsp.set_mixer(right_idx, right_idx, 0)
+        else:
+            dsp.start_tone(sig_ch, dsp.settings["default_tone_freq_hz"],
+                           dsp.settings["default_tone_gain_db"])
+            dsp.set_mixer(sig_ch, left_idx, 0)
+            dsp.set_mixer(sig_ch, right_idx, 0)
 
     def _measure_lr(self, dsp, zone, settle_s):
         """Read L/R output levels for the zone from a single DSP snapshot."""

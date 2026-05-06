@@ -139,8 +139,10 @@ def _get_category_paths(model="4ZSA"):
             ("Assert level \u0394", "verify"),
         ],
         "Balance": [
-            (f"SSH: dsp tone {sg}", "input"),
-            zone_route_step,
+            (f"SSH: dsp tone L+R channels", "input") if fw42
+                else (f"SSH: dsp tone {sg}", "input"),
+            (f"REST: AvMatrixRouting + dsp mix L\u2192outL, R\u2192outR", "process") if fw42
+                else (f"SSH: dsp mix {sg}\u2192{out1}", "process"),
             ("REST: Balance=\u00b1500", "highlight"),
             ("SSH: dsp \u2192 L/R output_db", "measure"),
             ("Assert L/R diff", "verify"),
