@@ -281,13 +281,20 @@ class DeviceSSH:
         raise ConnectionError(f"Failed to execute bash command on {self.ip}: {last_err}")
 
     def curl_bash(self, url, method="GET", body=None, timeout=10):
-        """Run curl on the unit and return (status_code, response_text)."""
+        """Run curl on the unit and return (status_code, response_text).
+
+        The -H value is passed as a single shell-quoted argument so that the
+        space in "Content-Type: application/json" does not cause bash to split
+        it into two tokens, which would make curl treat "application/json" as a
+        second URL (producing a spurious HTTP 000 entry in -w output that
+        corrupts the response payload parsed below).
+        """
         cmd = [
             "curl",
             "-sS",
             "-m", str(max(3, int(timeout))),
             "-X", method.upper(),
-            "-H", "Content-Type: application/json",
+            "-H", shlex.quote("Content-Type: application/json"),
         ]
         if body is not None:
             cmd.extend(["--data", shlex.quote(body)])
