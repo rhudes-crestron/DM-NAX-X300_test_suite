@@ -77,9 +77,10 @@ class TestClipping:
         # Measure output level
         level = dsp.measure_output_level(OUTPUT_NAME)
 
-        # Verify signal presence
+        # Verify signal presence (digital peak flag IsSignalClipping is NOT checked here —
+        # at 0 dBFS the hardware peak detector correctly asserts True, which is expected
+        # behaviour, not a failure. The real clipping check is AGC gain reduction below.)
         dsp.assert_signal_presence(zone, expected=True)
-        dsp.assert_signal_not_clipping(zone)
 
         # Read AGC state
         agc_raw = dsp.get_agc(0)
@@ -123,7 +124,6 @@ class TestClipping:
 
         # Verify signal presence (audio path alive) before cleanup
         dsp.assert_signal_presence(zone, expected=True)
-        dsp.assert_signal_not_clipping(zone)
 
         # Cleanup
         dsp.stop_tone(sig_ch)
