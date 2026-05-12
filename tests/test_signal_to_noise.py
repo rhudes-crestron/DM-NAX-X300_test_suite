@@ -77,9 +77,12 @@ class TestSignalToNoise:
 
         signal = dsp.measure_output_level(out_name)
 
-        # Verify signal presence on the active zone
-        zone = dsp.zone_for_output(out_idx)
-        dsp.assert_signal_presence(zone, expected=True)
+        # Verify the signal is clearly above the noise floor (not -inf or -341 dB).
+        # Do NOT use assert_signal_presence() (IsSignalDetected CresNext flag) here —
+        # that flag has a firmware hardware threshold (~-50 dB) unrelated to SNR.
+        assert signal > NOISE_FLOOR_MAX_DB, (
+            f"No signal detected on {out_name} after routing tone: {signal:.2f} dB"
+        )
 
         # 3. Cleanup
         dsp.stop_tone(sig_ch)
