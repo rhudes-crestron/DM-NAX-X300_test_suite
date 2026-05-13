@@ -118,8 +118,13 @@ class TestBridging:
         dsp.route_sig_to_output(1)  # A1R
         time.sleep(test_settings["signal_settle_time_s"])
 
-        level_l = dsp.measure_output_level("A1L", settle_time=0.2)
-        level_r = dsp.measure_output_level("A1R", settle_time=0.2)
+        # Read both channels from a single DSP state snapshot to avoid false
+        # failures on fw42 (8ZSA/4ZSP) where DspAudioCtl briefly shows
+        # -341 dB on A1L while reprogramming the crosspoint.  Separate calls
+        # can sample A1L mid-transient while A1R has already settled.
+        levels = dsp.measure_output_levels_batch(["A1L", "A1R"], settle_time=0.2)
+        level_l = levels["A1L"]
+        level_r = levels["A1R"]
         floor = test_settings["mute_floor_db"]
 
         # Verify signal presence before cleanup
