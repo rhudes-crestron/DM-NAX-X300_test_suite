@@ -496,22 +496,35 @@ class DSPController:
         raw = self.ssh.execute("dsp mix")
         return parse_mixer_output(raw)
 
-    def measure_output_level(self, output_name, settle_time=None):
-        """Read the output level for a named output (e.g. 'A1L')."""
+    def measure_output_level(self, output_name, settle_time=None, retries=2):
+        """Read the output level for a named output (e.g. 'A1L').
+
+        On 8ZSA, DSP block 1 (zones 5-8) intermittently omits output rows
+        from the ``dsp`` state table.  When the output is missing, retry
+        up to *retries* times with a short delay before giving up.
+        """
         if settle_time is None:
             settle_time = self.settings["signal_settle_time_s"]
         time.sleep(settle_time)
-        state = self.read_dsp_state()
-        if output_name in state.outputs:
-            level = state.outputs[output_name].output_db
-            log_event(
-                "VALIDATE",
-                f"check output level: output={output_name} measured={level:.2f}dB",
-            )
-            return level
+        for attempt in range(1 + retries):
+            state = self.read_dsp_state()
+            if output_name in state.outputs:
+                level = state.outputs[output_name].output_db
+                log_event(
+                    "VALIDATE",
+                    f"check output level: output={output_name} measured={level:.2f}dB",
+                )
+                return level
+            if attempt < retries:
+                log_event(
+                    "VALIDATE",
+                    f"output {output_name} missing in DSP state, retry {attempt + 1}/{retries}",
+                )
+                time.sleep(1.0)
         log_event(
             "VALIDATE",
-            f"check output level: output={output_name} missing_in_dsp_state -> measured=-inf",
+            f"check output level: output={output_name} missing_in_dsp_state after "
+            f"{retries} retries -> measured=-inf",
         )
         return float("-inf")
 

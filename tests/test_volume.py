@@ -41,11 +41,9 @@ class TestVolume:
 
         self._setup_signal(dsp, device_cfg, zone)
         dsp.set_zone_volume(zone, 800)
-        state = dsp.read_dsp_state()
-        out = state.outputs.get(out_name)
-        assert out, f"{out_name} output not found"
-        assert out.ducker_db > test_settings["mute_floor_db"], (
-            f"Zone {zone}: no signal at {out_name} with default volume: {out.ducker_db} dB"
+        level = dsp.measure_output_level(out_name)
+        assert level > test_settings["mute_floor_db"], (
+            f"Zone {zone}: no signal at {out_name} with default volume: {level:.2f} dB"
         )
 
     @pytest.mark.parametrize("zone", ALL_ZONES)
