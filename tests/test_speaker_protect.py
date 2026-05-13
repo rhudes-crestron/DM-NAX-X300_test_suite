@@ -137,6 +137,9 @@ class TestSpeakerProtect:
 
         dsp.start_sig_tone()
         dsp.route_sig_to_output(out_idx)
+        # On fw42, route_sig_to_output triggers HandleNewRoute which resets
+        # zone volume to ~30%.  Restore before measuring.
+        dsp.set_zone_volume(zone, 800)
         time.sleep(test_settings["signal_settle_time_s"])
 
         cn = dsp.cn

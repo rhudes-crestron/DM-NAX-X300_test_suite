@@ -44,13 +44,24 @@ class DSPController:
         return self.ssh.execute(f"dsp tone {channel} 0 0")
 
     def start_sig_tone(self, freq_hz=None, gain_db=None):
-        """Start a tone on the built-in signal generator channel."""
+        """Start a tone on all signal generator channels for the device.
+
+        On dual-DSP-block devices (8ZSA), starts the tone on both the DSP0
+        channel and the DSP1 channel so that outputs on either block can
+        receive the signal.
+        """
         freq = freq_hz or self.settings["default_tone_freq_hz"]
         gain = gain_db or self.settings["default_tone_gain_db"]
-        return self.start_tone(self.sig_ch, freq, gain)
+        self.start_tone(self.sig_ch, freq, gain)
+        dsp1 = self.cfg.get("signal_generator_dsp1")
+        if dsp1:
+            self.start_tone(dsp1["channel"], freq, gain)
 
     def stop_sig_tone(self):
-        return self.stop_tone(self.sig_ch)
+        self.stop_tone(self.sig_ch)
+        dsp1 = self.cfg.get("signal_generator_dsp1")
+        if dsp1:
+            self.stop_tone(dsp1["channel"])
 
     def start_white_noise(self, gain_db=-20):
         return self.ssh.execute(f"dsp wnoise {gain_db}")

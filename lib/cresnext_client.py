@@ -5,6 +5,7 @@ via the CresNext JSON web services interface.
 """
 import logging
 import json
+import time
 import requests
 import urllib3
 from .test_trace import log_event
@@ -131,30 +132,45 @@ class CresNextClient:
         if not self._session or not self._xsrf_token:
             self.connect()
 
-    def get(self, uri):
+    def get(self, uri, retries=2):
         """GET a CresNext URI and return the parsed JSON object.
 
         Args:
             uri: CresNext path, e.g. '/Device/ZoneOutputs/Zones/Zone1/ZoneAudio/'
+            retries: Number of retry attempts on transient ConnectionError.
         """
         self._ensure_connected()
         if not uri.startswith("/"):
             uri = "/" + uri
-        log_event("CRESNEXT", f"GET https://{self.ip}{uri}")
-        r = self._session.get(
-            f"https://{self.ip}{uri}", headers=self._headers(), timeout=30
-        )
-        r.raise_for_status()
-        payload = r.json()
-        log_event("CRESNEXT", f"RESP {r.status_code} GET ok")
-        return payload
+        last_exc = None
+        for attempt in range(1, retries + 2):
+            try:
+                log_event("CRESNEXT", f"GET https://{self.ip}{uri}")
+                r = self._session.get(
+                    f"https://{self.ip}{uri}", headers=self._headers(), timeout=30
+                )
+                r.raise_for_status()
+                payload = r.json()
+                log_event("CRESNEXT", f"RESP {r.status_code} GET ok")
+                return payload
+            except requests.exceptions.ConnectionError as exc:
+                last_exc = exc
+                if attempt <= retries:
+                    logger.warning(
+                        "CresNext GET %s attempt %d/%d failed: %s — reconnecting",
+                        uri, attempt, retries + 1, exc,
+                    )
+                    time.sleep(2)
+                    self._try_connect()
+        raise last_exc
 
-    def set(self, uri, body):
+    def set(self, uri, body, retries=2):
         """POST a CresNext property change.
 
         Args:
             uri:  CresNext path, e.g. '/Device/ZoneOutputs/Zones/Zone1/ZoneAudio/'
             body: Nested dict matching the CresNext object structure.
+            retries: Number of retry attempts on transient ConnectionError.
         """
         self._ensure_connected()
         if not uri.startswith("/"):
@@ -162,14 +178,29 @@ class CresNextClient:
         body_s = json.dumps(body, separators=(",", ":"))
         if len(body_s) > 500:
             body_s = body_s[:500] + "..."
-        log_event("CRESNEXT", f"POST https://{self.ip}{uri} body={body_s}")
-        r = self._session.post(
-            f"https://{self.ip}{uri}",
-            json=body,
-            headers=self._headers(),
-            timeout=30,
-        )
-        r.raise_for_status()
+        last_exc = None
+        for attempt in range(1, retries + 2):
+            try:
+                log_event("CRESNEXT", f"POST https://{self.ip}{uri} body={body_s}")
+                r = self._session.post(
+                    f"https://{self.ip}{uri}",
+                    json=body,
+                    headers=self._headers(),
+                    timeout=30,
+                )
+                r.raise_for_status()
+                break
+            except requests.exceptions.ConnectionError as exc:
+                last_exc = exc
+                if attempt <= retries:
+                    logger.warning(
+                        "CresNext POST %s attempt %d/%d failed: %s — reconnecting",
+                        uri, attempt, retries + 1, exc,
+                    )
+                    time.sleep(2)
+                    self._try_connect()
+                else:
+                    raise
         result = r.json()
         status_items = []
         actions = result.get("Actions", [])
