@@ -75,6 +75,11 @@ class TestSignalToNoise:
         dsp.start_tone(sig_ch, TONE_FREQ, TONE_GAIN)
         dsp.route_sig_to_output(out_idx, gain_db=0)
 
+        # On fw42, route_sig_to_output triggers HandleNewRoute which resets
+        # zone volume to ~30%.  Restore 0dB reference so SNR isn't penalised.
+        zone = dsp.zone_for_output(out_idx)
+        dsp.set_zone_volume(zone, 800)
+
         signal = dsp.measure_output_level(out_name)
 
         # Verify the signal is clearly above the noise floor (not -inf or -341 dB).
