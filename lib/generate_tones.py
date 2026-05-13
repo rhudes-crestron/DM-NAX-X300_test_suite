@@ -10,7 +10,7 @@ import struct
 import wave
 
 SAMPLE_RATE = 48000
-DURATION_S = 120        # 2 minutes
+DURATION_S = 900        # 15 minutes — must outlast the full streaming test session
 AMPLITUDE = 0.1         # ≈ -20 dBFS
 BIT_DEPTH = 16
 CHANNELS = 2
@@ -20,7 +20,8 @@ TONE_FREQUENCIES = [100, 200, 400, 800, 1000, 1500, 3000, 6000, 12000]
 
 
 def tone_filename(freq_hz):
-    return f"{freq_hz}Hz_-20dBFS_2min.wav"
+    min_s = DURATION_S // 60
+    return f"{freq_hz}Hz_-20dBFS_{min_s}min.wav"
 
 
 def generate_tone(out_dir, freq_hz, force=False):

@@ -268,8 +268,50 @@ def _do_reset(dsp, device_cfg):
         except Exception as e:
             logger.warning("DSP tone stop failed ch=%d: %s", ch, e)
 
-    # 2. Clear mixer crosspoints (fw21 only — console mixer is safe there)
-    if model not in {"8ZSA", "4ZSP"}:
+    # 2. Restore DSP mixer crosspoints.
+    #
+    # fw21 (4ZSA): clear all non-identity crosspoints then let DSP tests
+    # re-establish their own routes via set_mixer().
+    #
+    # fw42 (8ZSA/4ZSP): restore the identity matrix (In[N]→Out[N]@0dB)
+    # within each 8-channel block.  This is required because DSP tests
+    # (test_signal_to_noise, test_delay, etc.) modify the crosspoints via
+    # 'dsp mix' and leave them set.  Without resetting to identity, a
+    # subsequent streaming test inherits a broken mixer (e.g. In[0]→-inf,
+    # In[1]→Z1R only) causing the left amp output to be silent.
+    #
+    # IMPORTANT for fw42: only issue same-block 'dsp mix' commands.
+    # Cross-block routing (e.g. dsp mix 0 8) is architecturally invalid on
+    # the dual-SHARC platform and can hang the SPI bus.  Block 0: ch 0-7 →
+    # out 0-7.  Block 1: ch 8-15 → out 8-15.
+    if model in {"8ZSA", "4ZSP"}:
+        # First zero every crosspoint within each block (clear stale routes)
+        block_size = 8
+        for blk_start in (0, 8):
+            for ch in range(blk_start, blk_start + block_size):
+                for out in range(blk_start, blk_start + block_size):
+                    if ch != out:
+                        try:
+                            dsp.ssh.execute(
+                                f"dsp mix {ch} {out} -200",
+                                timeout=15, trace_source="RESET",
+                            )
+                        except Exception as e:
+                            logger.warning("fw42 mixer clear ch%d→out%d: %s", ch, out, e)
+        # Then restore identity: In[N]→Out[N]@0dB so both L and R channels
+        # of each zone are driven by their natural input pair.
+        for blk_start in (0, 8):
+            for n in range(blk_start, blk_start + block_size):
+                try:
+                    dsp.ssh.execute(
+                        f"dsp mix {n} {n} 0",
+                        timeout=15, trace_source="RESET",
+                    )
+                except Exception as e:
+                    logger.warning("fw42 mixer identity ch%d→out%d: %s", n, n, e)
+        logger.info("fw42 mixer restored to identity matrix")
+    else:
+        # fw21: clear all crosspoints (single block, no risk)
         cmds = []
         for ch in list(range(8)) + [sig_ch]:
             for out in range(num_outputs):
@@ -486,58 +528,88 @@ def audio_file_server(device_cfg):
 @pytest.fixture(scope="session")
 def streaming(device_cfg, ssh):
     """Session-scoped StreamingPlayerManager for all zones."""
-    from lib.streaming_client import StreamingPlayerManager, detect_mediaplayermode
+    from lib.streaming_client import StreamingPlayerManager, detect_mediaplayermode, MODE_MP1
 
     # Detect whether device is in MP1 (MediaStreamer) or MP2 (MediaStreamerV2) mode.
+    # Always checked via SSH port 22 (Crestron CLI) — no bash needed for this step.
+    # Streaming tests are written for MP1 (MediaStreamer) only; skip if the device
+    # reports a different mode.
     mode = detect_mediaplayermode(ssh)
+    if mode != MODE_MP1:
+        pytest.skip(
+            f"{device_cfg['model']} ({device_cfg['ip']}) is in {mode} mode; "
+            f"streaming tests require MP1 (MediaStreamer)"
+        )
 
-    # Streaming commands must run from unit-side bash to mirror nightly workflow.
+    # Resolve streaming connection parameters up front — needed for both the
+    # engineering-debug path and the tunnel probe below.
+    streaming_cfg = device_cfg.get("streaming", {})
+    base_port = streaming_cfg.get("base_port", 60001)
+    ip = device_cfg["ip"]
+    local_ip = streaming_cfg.get("local_ip", ip)
+
+    # Streaming commands are issued via on-device bash (port 6022).
+    # Three-step bash setup:
+    #   1. If bash already available → nothing to do.
+    #   2. Else if engineering debug is already enabled (persists across reboots)
+    #      → just open port 6022 via "sudo ... telnetport debug" on port 22.
+    #   3. Else → upload zip + imgupd engdbg + open port 6022 (auto_enable path).
     eng_cfg = device_cfg.get("engineering_debug", {})
     auto_enable = eng_cfg.get("auto_enable_for_streaming", True)
     enable_err = None
-    if not ssh.can_open_bash() and auto_enable:
-        try:
-            ssh.enable_engineering_debug(
-                zip_file=eng_cfg.get("zip_file"),
-                search_roots=eng_cfg.get("search_roots", []),
-                set_current_datetime=bool(eng_cfg.get("set_current_datetime", False)),
-                remote_zip_path=eng_cfg.get("remote_zip_path", "firmware/engineering_debug.zip"),
-                smb_username=eng_cfg.get("smb_username"),
-                smb_password=eng_cfg.get("smb_password"),
-                smb_domain=eng_cfg.get("smb_domain"),
-            )
-        except Exception as e:
-            enable_err = str(e)
-            logger.warning("Engineering debug auto-enable failed on %s: %s", device_cfg["ip"], e)
 
     if not ssh.can_open_bash():
-        detail = f"; enable reason: {enable_err}" if enable_err else ""
+        if ssh.is_engineering_debug_enabled():
+            # Eng debug is on but port 6022 is closed (normal after reboot).
+            logger.info(
+                "%s: eng debug already enabled — opening bash port via telnetport debug",
+                device_cfg["ip"],
+            )
+            sudo_pass = eng_cfg.get("sudo_pass", "NHPchCdpeGFdRbtf")
+            ssh.open_debug_bash_port(sudo_pass=sudo_pass)
+        elif auto_enable:
+            try:
+                ssh.enable_engineering_debug(
+                    zip_file=eng_cfg.get("zip_file"),
+                    search_roots=eng_cfg.get("search_roots", []),
+                    set_current_datetime=bool(eng_cfg.get("set_current_datetime", False)),
+                    remote_zip_path=eng_cfg.get("remote_zip_path", "firmware/engineering_debug.zip"),
+                    smb_username=eng_cfg.get("smb_username"),
+                    smb_password=eng_cfg.get("smb_password"),
+                    smb_domain=eng_cfg.get("smb_domain"),
+                    sudo_pass=eng_cfg.get("sudo_pass"),
+                )
+            except Exception as e:
+                enable_err = str(e)
+                logger.warning("Engineering debug auto-enable failed on %s: %s",
+                               device_cfg["ip"], e)
+
+    if not ssh.can_open_bash():
+        detail = f"; reason: {enable_err}" if enable_err else ""
         pytest.skip(
             f"Bash access unavailable on {device_cfg['model']} ({device_cfg['ip']}); "
-            f"engineering debug auto-enable did not provide bash access{detail}"
+            f"could not open debug port 6022{detail}"
         )
 
-    # Validate streaming API reachability from the unit using curl in bash.
-    base_port = device_cfg.get("streaming", {}).get("base_port", 60001)
-    ip = device_cfg["ip"]
+    # Validate streaming API reachability from the unit using on-device curl.
     try:
         status, payload = ssh.curl_bash(
-            url=f"http://{ip}:{base_port}/api/v1/player/status",
+            url=f"http://{local_ip}:{base_port}/api/v1/player/status",
             method="GET",
             body=None,
             timeout=6,
         )
     except Exception as e:
         pytest.skip(
-            f"Streaming curl probe failed from unit bash at {ip}:{base_port}: {e}"
+            f"Streaming curl probe failed on {device_cfg['model']} at {local_ip}:{base_port}: {e}"
         )
     if status == 0 or status >= 400:
         pytest.skip(
-            f"Streaming service not reachable via unit curl at {ip}:{base_port} "
+            f"Streaming service not reachable at {local_ip}:{base_port} "
             f"(HTTP {status}) — MediaStreamer ({mode}) may not be running on {device_cfg['model']}"
         )
 
-    logger.info("Streaming curl probe success on %s:%s (HTTP %s)", ip, base_port, status)
+    logger.info("Streaming curl probe success on %s:%s (HTTP %s)", local_ip, base_port, status)
     logger.debug("Streaming curl probe payload preview: %s", str(payload)[:220])
 
     mgr = StreamingPlayerManager(
@@ -545,6 +617,7 @@ def streaming(device_cfg, ssh):
         num_zones=device_cfg["zones"],
         mode=mode,
         ssh=ssh,
+        local_ip=local_ip if local_ip != ip else None,
     )
     logger.info("Streaming manager created: mode=%s, zones=%d", mode, device_cfg["zones"])
     yield mgr

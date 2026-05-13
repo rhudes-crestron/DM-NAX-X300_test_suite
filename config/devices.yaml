@@ -40,6 +40,7 @@ model_templates:
     dsp_tone_input: "Input01"
     streaming:
       base_port: 60001
+      local_ip: "10.10.10.2"   # MediaStreamer binds to this IP on iMX8 (fw42) devices
       zones:
         1: { input: "Input05", port: 60001, tone_hz: 100 }
         2: { input: "Input06", port: 60002, tone_hz: 200 }
@@ -69,6 +70,13 @@ devices:
       L2: { channels: ["L2L","L2R"], index: [6,7], type: "line", has_adc: true }
     signal_generator: { channel: 28, name: "SIG" }
     mixer_outputs: 10
+    engineering_debug:
+      auto_enable_for_streaming: true
+      sudo_pass: "Ykh3t5tcjKuhGeoh"
+      zip_file: ""
+      search_roots: []
+      set_current_datetime: false
+      remote_zip_path: "firmware/engineering_debug.zip"
 
   DM-NAX-8ZSA:
     <<: *nax_8zone
@@ -86,6 +94,7 @@ devices:
     mixer_outputs: 16   # two 8-ch DSP blocks = 16 mixer outputs
     engineering_debug:
       auto_enable_for_streaming: true
+      sudo_pass: "NHPchCdpeGFdRbtf"
       zip_file: ""
       search_roots: []
       smb_username: "builduser"
@@ -100,11 +109,19 @@ devices:
     username: "admin"
     password: "crestron"
     model: "4ZSP"
+    engineering_debug:
+      auto_enable_for_streaming: true
+      sudo_pass: "l5P2oZkOafUX2TwM"
+      zip_file: ""
+      search_roots: []
+      set_current_datetime: false
+      remote_zip_path: "firmware/engineering_debug.zip"
     # 4ZSP has 4 physical zones despite sharing the fw42 DSP platform
     zones: 4
     amp_outputs: ["A1L","A1R","A2L","A2R","A3L","A3R","A4L","A4R"]
     streaming:
       base_port: 60001
+      local_ip: "10.10.10.2"   # MediaStreamer binds to this IP on iMX8 (fw42) devices
       zones:
         1: { input: "Input05", port: 60001, tone_hz: 100 }
         2: { input: "Input06", port: 60002, tone_hz: 200 }

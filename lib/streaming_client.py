@@ -63,26 +63,66 @@ def detect_mediaplayermode(ssh):
 class StreamingPlayerClient:
     """Control a single media-player instance on a DM-NAX device."""
 
-    def __init__(self, device_ip, port, profile_id=PROFILE_ID, mode=MODE_MP2, ssh=None):
+    def __init__(self, device_ip, port, profile_id=PROFILE_ID, mode=MODE_MP2, ssh=None,
+                 local_ip=None):
         self.device_ip = device_ip
         self.port = port
         self.base_url = f"http://{device_ip}:{port}/api/v1"
         self.profile_id = profile_id
         self.mode = mode
         self.ssh = ssh
+        # On fw42 devices (8ZSA/4ZSP) MediaStreamer binds to a specific IP
+        # (e.g. 10.10.10.2) rather than 0.0.0.0, so on-device curl must
+        # use that IP instead of the external hostname.
+        self._curl_ip = local_ip if local_ip else device_ip
         # playerId = port - 60001 + 1  (V2 formula from common-utils.js)
         self.player_id = port - 60000
         self._service_active = False
 
-    def _request(self, method, endpoint, body=None, timeout=PLAYER_TIMEOUT_S):
-        """Execute a player API call via on-unit curl when bash is available."""
-        if self.ssh:
-            status, text = self.ssh.curl_bash(
-                url=endpoint,
+    def _curl_url(self, url):
+        """Replace device IP with local_ip in a URL for on-device curl execution."""
+        if self._curl_ip == self.device_ip:
+            return url
+        return url.replace(self.device_ip, self._curl_ip, 1)
+
+    def _ssh_request(self, method, url, body_str, timeout):
+        """Execute one HTTP request via SSH — curl_bash if bash available, else tunnel.
+
+        Returns (status_code, response_text).
+        On fw42 devices without bash (8ZSA/4ZSP) the local_ip is used inside
+        the tunnel so MediaStreamer is reachable at its internal binding address.
+        """
+        from urllib.parse import urlparse
+
+        local_url = self._curl_url(url)
+
+        if self.ssh.can_open_bash():
+            return self.ssh.curl_bash(
+                url=local_url,
                 method=method,
-                body=None if body is None else json.dumps(body),
+                body=body_str,
                 timeout=timeout,
             )
+
+        # No bash — use paramiko direct-tcpip tunnel to the internal IP.
+        parsed = urlparse(local_url)
+        path = parsed.path or "/"
+        if parsed.query:
+            path += f"?{parsed.query}"
+        return self.ssh.http_tunnel_request(
+            remote_host=parsed.hostname,
+            remote_port=parsed.port or 80,
+            method=method,
+            path=path,
+            body_str=body_str,
+            timeout=timeout,
+        )
+
+    def _request(self, method, endpoint, body=None, timeout=PLAYER_TIMEOUT_S):
+        """Execute a player API call via SSH (curl or tunnel) or direct requests."""
+        if self.ssh:
+            body_str = None if body is None else json.dumps(body)
+            status, text = self._ssh_request(method, endpoint, body_str, timeout)
             if status == 0 or status >= 400:
                 raise requests.HTTPError(
                     f"HTTP {status} for {method} {endpoint}: {text[:300]}"
@@ -90,7 +130,7 @@ class StreamingPlayerClient:
             if not text:
                 return {}
             try:
-                    return json.loads(text)
+                return json.loads(text)
             except Exception:
                 return {"raw": text}
 
@@ -118,12 +158,7 @@ class StreamingPlayerClient:
         url = f"{self.base_url}/services/{service_id}"
         body = {"profileId": self.profile_id} if self.mode == MODE_MP2 else {}
         if self.ssh:
-            status, text = self.ssh.curl_bash(
-                url=url,
-                method="POST",
-                body=json.dumps(body),
-                timeout=SERVICE_TIMEOUT_S,
-            )
+            status, text = self._ssh_request("POST", url, json.dumps(body), SERVICE_TIMEOUT_S)
             if status == 409:
                 logger.debug("Player %d: session already active", self.port)
                 self._service_active = True
@@ -132,7 +167,7 @@ class StreamingPlayerClient:
                 raise requests.HTTPError(f"HTTP {status} for POST {url}: {text[:300]}")
             payload = json.loads(text) if text else {}
             self._service_active = True
-            logger.info("Player %d: started service '%s' (mode=%s, via=curl)", self.port, service_id, self.mode)
+            logger.info("Player %d: started service '%s' (mode=%s)", self.port, service_id, self.mode)
             return payload
 
         r = requests.post(url, json=body, timeout=SERVICE_TIMEOUT_S)
@@ -253,7 +288,8 @@ class StreamingPlayerClient:
 class StreamingPlayerManager:
     """Manage all media-player instances on a DM-NAX device."""
 
-    def __init__(self, device_ip, num_zones, base_port=DEFAULT_BASE_PORT, mode=MODE_MP2, ssh=None):
+    def __init__(self, device_ip, num_zones, base_port=DEFAULT_BASE_PORT, mode=MODE_MP2, ssh=None,
+                 local_ip=None):
         self.device_ip = device_ip
         self.num_zones = num_zones
         self.base_port = base_port
@@ -262,7 +298,9 @@ class StreamingPlayerManager:
         self.players = {}
         for zone in range(1, num_zones + 1):
             port = base_port + (zone - 1)
-            self.players[zone] = StreamingPlayerClient(device_ip, port, mode=mode, ssh=ssh)
+            self.players[zone] = StreamingPlayerClient(
+                device_ip, port, mode=mode, ssh=ssh, local_ip=local_ip
+            )
 
     def get_player(self, zone):
         return self.players[zone]

@@ -490,6 +490,49 @@ class DSPController:
         )
         return float("-inf")
 
+    def measure_output_levels_batch(self, output_names, settle_time=None):
+        """Read levels for multiple outputs from a single DSP state snapshot.
+
+        Use this instead of calling measure_output_level() repeatedly when
+        all channels must be sampled at the same instant (e.g. stereo L+R).
+        Returns a dict mapping output_name -> level_db.
+        """
+        if settle_time is None:
+            settle_time = self.settings["signal_settle_time_s"]
+        time.sleep(settle_time)
+        state = self.read_dsp_state()
+        result = {}
+        for name in output_names:
+            if name in state.outputs:
+                level = state.outputs[name].output_db
+                log_event("VALIDATE", f"check output level: output={name} measured={level:.2f}dB")
+                result[name] = level
+            else:
+                log_event("VALIDATE", f"check output level: output={name} missing_in_dsp_state -> measured=-inf")
+                result[name] = float("-inf")
+        return result
+
+    def measure_input_levels_batch(self, input_names, settle_time=None):
+        """Read levels for multiple inputs from a single DSP state snapshot.
+
+        Stereo companion to measure_output_levels_batch for fw21 devices.
+        Returns a dict mapping input_name -> level_db.
+        """
+        if settle_time is None:
+            settle_time = self.settings["signal_settle_time_s"]
+        time.sleep(settle_time)
+        state = self.read_dsp_state()
+        result = {}
+        for name in input_names:
+            if name in state.inputs:
+                level = state.inputs[name].level_db
+                log_event("VALIDATE", f"check input level: input={name} measured={level:.2f}dB")
+                result[name] = level
+            else:
+                log_event("VALIDATE", f"check input level: input={name} missing_in_dsp_state -> measured=-inf")
+                result[name] = float("-inf")
+        return result
+
     def measure_mixer_level(self, output_name, settle_time=None):
         """Read the mixer (pre-processing) output level."""
         if settle_time is None:

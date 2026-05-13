@@ -310,6 +310,85 @@ class DeviceSSH:
             code = 0
         return code, payload.strip()
 
+    def http_tunnel_request(self, remote_host, remote_port, method, path,
+                            body_str=None, timeout=10):
+        """HTTP request tunneled through SSH direct-tcpip to a device-internal address.
+
+        Used on fw42 devices (8ZSA/4ZSP) where MediaStreamer binds to an internal
+        IP (e.g. 10.10.10.2) that is not externally routable.  Paramiko opens a
+        direct-tcpip channel through the existing SSH session — no bash required.
+
+        Returns (status_code, response_body_text).
+        """
+        self.connect()
+        transport = self._client.get_transport()
+        try:
+            channel = transport.open_channel(
+                "direct-tcpip",
+                (remote_host, remote_port),
+                ("127.0.0.1", 0),
+                timeout=timeout,
+            )
+        except Exception as e:
+            raise ConnectionError(
+                f"SSH direct-tcpip to {remote_host}:{remote_port} failed: {e}"
+            )
+
+        channel.settimeout(timeout)
+        try:
+            body_bytes = b""
+            if body_str:
+                body_bytes = (body_str.encode("utf-8")
+                              if isinstance(body_str, str) else body_str)
+
+            header_lines = [
+                f"{method.upper()} {path} HTTP/1.1",
+                f"Host: {remote_host}:{remote_port}",
+                "Content-Type: application/json",
+                "Connection: close",
+                f"Content-Length: {len(body_bytes)}",
+            ]
+            request = "\r\n".join(header_lines) + "\r\n\r\n"
+            channel.sendall(request.encode("ascii"))
+            if body_bytes:
+                channel.sendall(body_bytes)
+
+            resp_bytes = b""
+            while True:
+                try:
+                    chunk = channel.recv(8192)
+                    if not chunk:
+                        break
+                    resp_bytes += chunk
+                except Exception:
+                    break
+        finally:
+            channel.close()
+
+        try:
+            sep = resp_bytes.find(b"\r\n\r\n")
+            if sep < 0:
+                return 0, resp_bytes.decode("utf-8", errors="replace")
+            status_line = resp_bytes[:resp_bytes.find(b"\r\n")].decode()
+            status_code = int(status_line.split()[1])
+            body = resp_bytes[sep + 4:].decode("utf-8", errors="replace")
+            log_event("TUNNEL", f"{method} {remote_host}:{remote_port}{path} → HTTP {status_code}")
+            return status_code, body
+        except Exception as e:
+            logger.warning("Failed to parse HTTP tunnel response: %s", e)
+            return 0, resp_bytes.decode("utf-8", errors="replace")
+
+    def can_tunnel(self, remote_host, remote_port, timeout=5):
+        """Return True if a direct-tcpip tunnel to remote_host:remote_port succeeds."""
+        try:
+            status, _ = self.http_tunnel_request(
+                remote_host, remote_port, "GET", "/api/v1/player/status",
+                timeout=timeout,
+            )
+            return status > 0
+        except Exception:
+            return False
+
     def can_open_bash(self):
         """Return True if the unit accepts bash commands via debug/console path."""
         try:
@@ -481,6 +560,7 @@ class DeviceSSH:
         smb_username=None,
         smb_password=None,
         smb_domain=None,
+        sudo_pass=None,
     ):
         """Enable engineering debug mode (VETest-style) and verify it."""
         if self.is_engineering_debug_enabled():
@@ -519,7 +599,45 @@ class DeviceSSH:
             raise RuntimeError(f"Failed to enable engineering debug on {self.ip}. ver -v: {ver}")
 
         logger.info("Engineering debug enabled on %s", self.ip)
+
+        # Open the debug bash port (port 6022) so execute_bash() can use it.
+        self.open_debug_bash_port(sudo_pass=sudo_pass)
         return True
+
+    def open_debug_bash_port(self, debug_port=6022,
+                             sudo_user="crengsuperuser",
+                             sudo_pass=None):
+        """Open the engineering debug bash port (6022) via the Crestron CLI.
+
+        Engineering debug mode persists across reboots but port 6022 must be
+        re-opened each boot via:
+            sudo -SN:<user> -SP:<pass> telnetport debug
+
+        Waits up to 10 s for the port to become reachable after issuing the
+        command.  Logs a warning (does not raise) if it times out.
+        """
+        cmd = f"sudo -SN:{sudo_user} -SP:{sudo_pass or 'NHPchCdpeGFdRbtf'} telnetport debug"
+        try:
+            self.execute(cmd, timeout=15)
+            logger.info("Issued telnetport debug on %s — waiting for port %d", self.ip, debug_port)
+        except Exception as e:
+            logger.warning("telnetport debug command failed on %s: %s", self.ip, e)
+            return False
+
+        # Poll until port 6022 accepts connections (up to 10 s).
+        import socket as _socket
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            try:
+                s = _socket.create_connection((self.ip, debug_port), timeout=2)
+                s.close()
+                logger.info("Debug bash port %d is open on %s", debug_port, self.ip)
+                return True
+            except OSError:
+                time.sleep(1)
+
+        logger.warning("Debug bash port %d did not open on %s within 10 s", debug_port, self.ip)
+        return False
 
     def execute_retry(self, command, retries=2, delay=2.0, timeout=15):
         """Execute with automatic retry on failure."""

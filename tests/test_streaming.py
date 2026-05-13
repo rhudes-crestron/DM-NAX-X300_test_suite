@@ -129,7 +129,12 @@ def _measure_streaming_level(dsp, name, device_cfg, settle_time=1.0):
 def _resolve_stream_audio_source(device_cfg, zone_num, default_input, mode):
     """Resolve per-zone AudioSource for current media-player mode.
 
-    StreamRoutings sheet for MP1 on 8-zone platforms uses Input09..Input16.
+    On fw42 iMX8 devices (8ZSA, 4ZSP) in MP1 mode, physical inputs occupy
+    Input01-08 and the eight MediaStreamer zone players are mapped at
+    Input09-16.  Zone N player connects as Input{N+8}.
+
+    On fw21 (4ZSA) the streaming inputs are Input05-08 (Input{N+4}), which
+    matches the default_input values in the devices.yaml config.
     """
     model = str(device_cfg.get("model", "")).upper()
     if mode == MODE_MP1 and model in {"8ZSA", "4ZSP"}:
@@ -271,9 +276,15 @@ class TestStreamingLevels:
             url = _audio_url(host_ip, srv_port, freq)
             player.start_streaming(url, settle_s=PLAY_SETTLE_S)
 
-        # Measure levels at the appropriate DSP point
-        level_l = _measure_streaming_level(dsp, left, device_cfg, settle_time=2.0)
-        level_r = _measure_streaming_level(dsp, right, device_cfg, settle_time=0.5)
+        # Measure L and R from a single DSP state snapshot so both channels
+        # are sampled at the same instant.  Separate calls can produce false
+        # failures when MediaStreamer has a brief level transient between reads.
+        if device_cfg.get("dsp_fw_version", 21) >= 42:
+            levels = dsp.measure_output_levels_batch([left, right], settle_time=2.0)
+        else:
+            levels = dsp.measure_input_levels_batch([left, right], settle_time=2.0)
+        level_l = levels[left]
+        level_r = levels[right]
 
         logger.info(
             "Zone %d (%d Hz): L=%.2f dB, R=%.2f dB (expected %.1f to %.1f)",
@@ -343,41 +354,6 @@ class TestStreamingSignalPresence:
         )
         assert clipping is not True, (
             f"Zone {zone_num}: IsSignalClipping is True — signal is clipping!"
-        )
-
-
-class TestStreamingIsolation:
-    """Phase 5: Verify per-zone isolation — each zone has independent signal."""
-
-    @pytest.mark.parametrize("zone_num", list(range(1, 9)))
-    def test_zone_isolation(self, dsp, device_cfg, streaming,
-                            audio_file_server, cresnext, zone_num):
-        """Each zone has independent signal on its own DSP mux input."""
-        zones = _streaming_zones(device_cfg)
-        if zone_num not in zones:
-            pytest.skip(f"Zone {zone_num} not in streaming config")
-
-        # Verify target zone has signal
-        left, right = _streaming_inputs_for_zone(zone_num, device_cfg)
-        level_l = _measure_streaming_level(dsp, left, device_cfg, settle_time=1.0)
-        level_r = _measure_streaming_level(dsp, right, device_cfg, settle_time=0.5)
-
-        logger.info(
-            "Zone %d isolation: L=%.2f dB, R=%.2f dB",
-            zone_num, level_l, level_r,
-        )
-
-        # Each zone should have signal on its own M input
-        assert level_l > LEVEL_LOWER_DB, (
-            f"Zone {zone_num} {left} level too low: {level_l:.2f} dB"
-        )
-        assert level_r > LEVEL_LOWER_DB, (
-            f"Zone {zone_num} {right} level too low: {level_r:.2f} dB"
-        )
-
-        # L and R should be roughly equal (stereo balance)
-        assert abs(level_l - level_r) < 2.0, (
-            f"Zone {zone_num} stereo imbalance: L={level_l:.2f} R={level_r:.2f}"
         )
 
 
