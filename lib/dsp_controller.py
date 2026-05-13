@@ -215,6 +215,31 @@ class DSPController:
         sig_ch = self.sig_ch_for_output(output_ch)
         return self.set_mixer(sig_ch, output_ch, gain_db)
 
+    def route_sig_to_outputs(self, output_chs, gain_db=0):
+        """Route signal generator to multiple output channels simultaneously.
+
+        Unlike route_sig_to_output() which clears all crosspoints before
+        setting one, this method clears once then sets ALL requested
+        crosspoints — avoiding the second call wiping the first.
+        """
+        if self._model in self._FW42_MODELS:
+            if self.cn is not None:
+                zones_done = set()
+                max_zone = self.cfg.get("zones", 4)
+                for out in output_chs:
+                    zone = self.zone_for_output(out)
+                    if 1 <= zone <= max_zone and zone not in zones_done:
+                        self._set_tone_source_for_zone(zone)
+                        zones_done.add(zone)
+            self.clear_all_sig_routes()
+            for out in output_chs:
+                sig_ch = self.sig_ch_for_output(out)
+                self.set_mixer(sig_ch, out, gain_db)
+            return
+        for out in output_chs:
+            sig_ch = self.sig_ch_for_output(out)
+            self.set_mixer(sig_ch, out, gain_db)
+
     def clear_sig_route(self, output_ch):
         sig_ch = self.sig_ch_for_output(output_ch)
         return self.clear_mixer(sig_ch, output_ch)
