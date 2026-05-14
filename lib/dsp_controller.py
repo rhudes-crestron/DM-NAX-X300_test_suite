@@ -539,17 +539,30 @@ class DSPController:
         )
         return float("-inf")
 
-    def measure_output_levels_batch(self, output_names, settle_time=None):
+    def measure_output_levels_batch(self, output_names, settle_time=None, retries=2):
         """Read levels for multiple outputs from a single DSP state snapshot.
 
         Use this instead of calling measure_output_level() repeatedly when
         all channels must be sampled at the same instant (e.g. stereo L+R).
         Returns a dict mapping output_name -> level_db.
+
+        On 8ZSA, DSP block 1 intermittently omits output rows.  When any
+        requested output is missing, retry up to *retries* times.
         """
         if settle_time is None:
             settle_time = self.settings["signal_settle_time_s"]
         time.sleep(settle_time)
-        state = self.read_dsp_state()
+        for attempt in range(1 + retries):
+            state = self.read_dsp_state()
+            missing = [n for n in output_names if n not in state.outputs]
+            if not missing:
+                break
+            if attempt < retries:
+                log_event(
+                    "VALIDATE",
+                    f"batch: {missing} missing in DSP state, retry {attempt + 1}/{retries}",
+                )
+                time.sleep(1.0)
         result = {}
         for name in output_names:
             if name in state.outputs:

@@ -77,11 +77,11 @@ logger = logging.getLogger(__name__)
 # The spreadsheet uses -35 to -38 dB with Audio Precision measuring externally.
 # Streaming audio from MediaStreamerV2 arrives at DSP mux inputs M1-M4
 # at approximately -34 dB for -20 dBFS source material.
-LEVEL_UPPER_DB = -20.0
+LEVEL_UPPER_DB = -15.0
 LEVEL_LOWER_DB = -45.0
 SILENCE_FLOOR_DB = -100.0
 PLAY_SETTLE_S = 8.0        # Time for streaming to stabilise
-STOP_SETTLE_S = 3.0        # Time for output to drop after stop
+STOP_SETTLE_S = 8.0        # Time for output to drop after stop
 
 
 def _streaming_zones(device_cfg):
