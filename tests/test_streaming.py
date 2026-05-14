@@ -360,13 +360,29 @@ class TestStreamingSignalPresence:
 class TestStreamingCleanup:
     """Phase 6: Stop all streaming and verify silence."""
 
-    def test_stop_all_players(self, streaming, device_cfg):
-        """Stop playback and deactivate service on all players."""
+    def test_stop_all_players(self, streaming, device_cfg, cresnext):
+        """Stop playback and deactivate service on all players.
+
+        After stopping players, also clear AvMatrixRouting for every zone so the
+        DSP input is severed even if a player's stop() call fails silently (e.g.
+        HTTP 5xx or timeout on a DSP1 zone port).  This prevents residual signal
+        on DSP1 amp outputs (A5L/A7L) from causing false failures in the silence
+        checks that follow.
+        """
         zones = _streaming_zones(device_cfg)
         for zone in sorted(zones.keys()):
             player = streaming.get_player(zone)
             player.stop_streaming()
             logger.info("Zone %d: stopped streaming", zone)
+
+        # Clear zone sources via CresNext to sever DSP routing regardless of
+        # whether the individual player stop commands succeeded.
+        for zone in sorted(zones.keys()):
+            try:
+                cresnext.set_zone_source(zone, "")
+                logger.info("Zone %d: CresNext route cleared", zone)
+            except Exception as e:
+                logger.warning("Zone %d: failed to clear CresNext route: %s", zone, e)
 
         time.sleep(STOP_SETTLE_S)
 
