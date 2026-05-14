@@ -40,7 +40,7 @@ def detect_mediaplayermode(ssh):
     """Detect the MediaPlayer mode (MP1/MP2) via SSH.
 
     Runs the ``mediaplayer`` console command and parses the output.
-    Returns MODE_MP1 or MODE_MP2 (defaults to MP2 if detection fails).
+    Returns MODE_MP1 or MODE_MP2 (defaults to MP1 if detection fails).
     """
     try:
         output = ssh.execute("mediaplayer", timeout=5)
@@ -53,11 +53,11 @@ def detect_mediaplayermode(ssh):
             if "MP1" in line.upper():
                 logger.info("Detected MediaPlayer mode: MP1")
                 return MODE_MP1
-        logger.warning("Could not parse mediaplayer output: %r, defaulting to MP2", output)
-        return MODE_MP2
+        logger.warning("Could not parse mediaplayer output: %r, defaulting to MP1", output)
+        return MODE_MP1
     except Exception as e:
-        logger.warning("Failed to detect mediaplayermode via SSH: %s, defaulting to MP2", e)
-        return MODE_MP2
+        logger.warning("Failed to detect mediaplayermode via SSH: %s, defaulting to MP1", e)
+        return MODE_MP1
 
 
 class StreamingPlayerClient:

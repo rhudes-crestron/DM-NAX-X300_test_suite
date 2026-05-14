@@ -6,11 +6,13 @@ via the CresNext JSON web services interface.
 import logging
 import json
 import time
+import warnings
 import requests
 import urllib3
 from .test_trace import log_event
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
 logger = logging.getLogger(__name__)
 
