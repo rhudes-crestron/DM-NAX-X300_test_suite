@@ -81,7 +81,10 @@ LEVEL_UPPER_DB = -15.0
 LEVEL_LOWER_DB = -45.0
 SILENCE_FLOOR_DB = -100.0
 PLAY_SETTLE_S = 8.0        # Time for streaming to stabilise
-STOP_SETTLE_S = 8.0        # Time for output to drop after stop
+STOP_SETTLE_S = 20.0       # Time for output to drop after stop.
+                           # fw42 8ZSA DSP1 amp outputs decay at ~3 dB/s after route
+                           # clear; Zone 7/8 need ~27s total (settle + prior zone
+                           # measurements) to fall below SILENCE_FLOOR_DB (-100 dB).
 
 
 def _streaming_zones(device_cfg):
