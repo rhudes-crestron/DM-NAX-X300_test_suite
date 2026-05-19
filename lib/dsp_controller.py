@@ -62,6 +62,7 @@ class DSPController:
         dsp1 = self.cfg.get("signal_generator_dsp1")
         if dsp1:
             self.stop_tone(dsp1["channel"])
+        self.clear_all_sig_routes()
 
     def start_white_noise(self, gain_db=-20):
         return self.ssh.execute(f"dsp wnoise {gain_db}")
