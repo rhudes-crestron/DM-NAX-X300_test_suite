@@ -70,7 +70,7 @@ test_targets:
     enabled: true
     device: "DM-NAX-4ZSA"          # profile name in devices.yaml
     firmware_file: ""               # auto-detect from firmware_dir
-    skip_upgrade: true              # 4ZSA firmware handled separately
+    skip_upgrade: false
     tests:
       - *audio_quality
       - *dsp_processing
