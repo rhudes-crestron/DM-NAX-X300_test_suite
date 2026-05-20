@@ -304,6 +304,28 @@ class CresNextClient:
         }
         return self.set(uri, body)
 
+    def clear_zone_route(self, zone):
+        """Remove a zone's AvMatrixRouting entry entirely.
+
+        Unlike ``set_zone_source(zone, "")`` (which keeps the route binding
+        alive with an empty AudioSource), sending an empty-object body
+        deletes the Zone{N} entry from Routes.  On fw42 (iMX8) this is
+        required to fully sever the MediaStreamer audio source so it stops
+        feeding residual noise (~-70 dB) into the zone amp output after
+        a player has been stopped.
+        """
+        uri = f"/Device/AvMatrixRouting/Routes/Zone{zone}/"
+        body = {
+            "Device": {
+                "AvMatrixRouting": {
+                    "Routes": {
+                        f"Zone{zone}": {}
+                    }
+                }
+            }
+        }
+        return self.set(uri, body)
+
     def get_zone_source(self, zone):
         """Read the current AudioSource for a zone from AvMatrixRouting.
 

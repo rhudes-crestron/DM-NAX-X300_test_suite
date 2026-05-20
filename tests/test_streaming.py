@@ -379,10 +379,14 @@ class TestStreamingCleanup:
             logger.info("Zone %d: stopped streaming", zone)
 
         # Clear zone sources via CresNext to sever DSP routing regardless of
-        # whether the individual player stop commands succeeded.
+        # whether the individual player stop commands succeeded.  Send an
+        # empty-object body so the Zone{N} entry is removed entirely; merely
+        # setting AudioSource="" keeps the binding alive on fw42 and the
+        # MediaStreamer source continues feeding ~-70 dB noise into the amp
+        # output.
         for zone in sorted(zones.keys()):
             try:
-                cresnext.set_zone_source(zone, "")
+                cresnext.clear_zone_route(zone)
                 logger.info("Zone %d: CresNext route cleared", zone)
             except Exception as e:
                 logger.warning("Zone %d: failed to clear CresNext route: %s", zone, e)
@@ -439,7 +443,7 @@ class TestStreamingCleanup:
         zones = device_cfg.get("selected_zones", list(range(1, device_cfg.get("zones", 4) + 1)))
         for z in zones:
             try:
-                cresnext.set_zone_source(z, "")
+                cresnext.clear_zone_route(z)
             except Exception:
                 pass
             logger.info("Zone %d: route cleared", z)
