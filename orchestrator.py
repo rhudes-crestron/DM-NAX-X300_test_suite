@@ -178,7 +178,8 @@ def run_device_tests(target_name, target_cfg, devices_cfg, timestamp, skip_upgra
 
     # Phase 1: Firmware upgrade
     upgrade_ok = True
-    if firmware_tests and not skip_upgrade:
+    target_skip = target_cfg.get("skip_upgrade", False)
+    if firmware_tests and not skip_upgrade and not target_skip:
         logger.info("[%s] Phase 1: Firmware upgrade", target_name)
         upgrade_cmd = base_args + [
             f"--json-report-file={run_dir / 'upgrade_results.json'}",

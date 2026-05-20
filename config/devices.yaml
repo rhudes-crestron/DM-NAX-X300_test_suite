@@ -59,7 +59,7 @@ model_templates:
 devices:
   DM-NAX-4ZSA:
     <<: *nax_4zone
-    ip: "dm-nax-4zsa-50-c4426800017c"
+    ip: "10.88.121.67"
     username: "admin"
     password: "admin123"
     model: "4ZSA"
