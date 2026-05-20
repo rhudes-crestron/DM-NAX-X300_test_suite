@@ -52,12 +52,14 @@ class DSPController:
         """
         freq = freq_hz or self.settings["default_tone_freq_hz"]
         gain = gain_db or self.settings["default_tone_gain_db"]
+        log_event("SETUP", f"start_sig_tone freq={freq}Hz gain={gain}dB")
         self.start_tone(self.sig_ch, freq, gain)
         dsp1 = self.cfg.get("signal_generator_dsp1")
         if dsp1:
             self.start_tone(dsp1["channel"], freq, gain)
 
     def stop_sig_tone(self):
+        log_event("CLEANUP", "stop_sig_tone")
         self.stop_tone(self.sig_ch)
         dsp1 = self.cfg.get("signal_generator_dsp1")
         if dsp1:
@@ -210,6 +212,7 @@ class DSPController:
         On fw21 devices, routes via the DSP mixer crosspoint which feeds
         into the zone chain on that firmware architecture.
         """
+        log_event("SETUP", f"route_sig_to_output ch={output_ch} gain={gain_db}dB")
         if self._model in self._FW42_MODELS:
             if self.cn is not None:
                 zone = self.zone_for_output(output_ch)
@@ -234,6 +237,7 @@ class DSPController:
         setting one, this method clears once then sets ALL requested
         crosspoints — avoiding the second call wiping the first.
         """
+        log_event("SETUP", f"route_sig_to_outputs chs={output_chs} gain={gain_db}dB")
         if self._model in self._FW42_MODELS:
             if self.cn is not None:
                 zones_done = set()
@@ -253,6 +257,7 @@ class DSPController:
             self.set_mixer(sig_ch, out, gain_db)
 
     def clear_sig_route(self, output_ch):
+        log_event("CLEANUP", f"clear_sig_route output_ch={output_ch}")
         sig_ch = self.sig_ch_for_output(output_ch)
         return self.clear_mixer(sig_ch, output_ch)
 

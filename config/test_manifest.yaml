@@ -148,6 +148,8 @@ email:
   smtp_port: 25
   from_address: "dmnax-nightly@crestron.com"
   base_url: "http://nj6v-docker-04"    # dashboard hostname for report links
+  attach_logs: true                     # attach per-device test_logs zip to email
+  max_attachment_mb: 3                  # total cap across all devices (MB)
   recipients:
     - "praghupathy@crestron.com"
     - "ageormaneanu@crestron.com"

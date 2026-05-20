@@ -2,12 +2,20 @@
 Email notification for DM-NAX nightly test runs.
 
 Sends an HTML summary email after each orchestrator run with a link
-to the per-run index page on the dashboard.
+to the per-run index page on the dashboard.  Optionally attaches
+per-device zip archives of test_logs/ for offline debugging.
 """
+import io
+import json
 import logging
+import os
 import smtplib
+import zipfile
+from email import encoders
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +31,83 @@ def _fmt_duration(seconds):
         s = seconds % 60
         return f"{m}m {s}s" if s else f"{m}m"
     return f"{seconds}s"
+
+
+def _failed_test_log_names(results_dir):
+    """Return set of test_log filenames that correspond to failed tests.
+
+    Reads all_results.json to find failed test nodeids and maps them to the
+    log filename convention: tests_<file>_<Class>_<method>_<param>.log
+    """
+    results_path = Path(results_dir) / "all_results.json"
+    if not results_path.exists():
+        return None  # Can't filter; fall back to including all
+    try:
+        with open(results_path) as f:
+            data = json.load(f)
+        tests = data.get("tests", [])
+        failed_names = set()
+        for t in tests:
+            if t.get("outcome") != "passed":
+                # nodeid: "tests/test_streaming.py::TestClass::test_method[param]"
+                nodeid = t.get("nodeid", "")
+                # Convert to log filename
+                name = nodeid.replace("/", "_").replace("::", "_").replace("[", "_").replace("]", "")
+                name = name.rstrip("_") + ".log"
+                failed_names.add(name)
+        return failed_names if failed_names else None
+    except Exception:
+        return None
+
+
+def _create_test_logs_zip(results_dir, device_name, max_bytes=1_000_000):
+    """Create an in-memory zip of test_logs/ for a device run.
+
+    If the full zip exceeds max_bytes, retries with only failed-test logs.
+    Returns (zip_bytes, filename) or None if no logs exist.
+    """
+    logs_dir = Path(results_dir) / "test_logs"
+    if not logs_dir.is_dir():
+        return None
+
+    log_files = sorted(logs_dir.glob("*.log"))
+    if not log_files:
+        return None
+
+    def _zip_files(files):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for fp in files:
+                zf.write(fp, arcname=fp.name)
+        return buf.getvalue()
+
+    # Try full archive first
+    zip_data = _zip_files(log_files)
+    if len(zip_data) <= max_bytes:
+        filename = f"{device_name}_test_logs.zip"
+        logger.info("Zip %s: %d files, %d KB", filename, len(log_files), len(zip_data) // 1024)
+        return zip_data, filename
+
+    # Over limit — fall back to failed-test logs only
+    logger.info("Full zip for %s is %d KB (over %d KB limit), using failed-only",
+                device_name, len(zip_data) // 1024, max_bytes // 1024)
+    failed_names = _failed_test_log_names(results_dir)
+    if failed_names:
+        failed_files = [f for f in log_files if f.name in failed_names]
+        # Also include module reset logs for context
+        failed_files += [f for f in log_files if f.name.startswith("module_reset")]
+        failed_files = sorted(set(failed_files))
+        if failed_files:
+            zip_data = _zip_files(failed_files)
+            if len(zip_data) <= max_bytes:
+                filename = f"{device_name}_failed_logs.zip"
+                logger.info("Zip %s: %d files, %d KB", filename, len(failed_files), len(zip_data) // 1024)
+                return zip_data, filename
+
+    # Still over limit or no failed tests identified — skip
+    logger.warning("Zip for %s exceeds limit even with failed-only (%d KB), skipping attachment",
+                   device_name, len(zip_data) // 1024)
+    return None
 
 
 def _build_html_body(summary, index_url):
@@ -121,12 +206,13 @@ def _build_html_body(summary, index_url):
 
 
 def send_run_notification(summary, index_url, email_cfg):
-    """Send the nightly run summary email.
+    """Send the nightly run summary email with optional log attachments.
 
     Args:
-        summary:   dict from run_summary.json
+        summary:   dict from run_summary.json (includes targets[].results_dir)
         index_url: full URL to the run index page (e.g. http://nj6v-docker-04/run/2026-05-02_01-00-00)
-        email_cfg: dict with keys: smtp_host, smtp_port, from_address, recipients[]
+        email_cfg: dict with keys: smtp_host, smtp_port, from_address, recipients[],
+                   attach_logs (bool), max_attachment_mb (float)
     """
     smtp_host = email_cfg.get("smtp_host", "smtp.crestron.com")
     smtp_port = email_cfg.get("smtp_port", 25)
@@ -154,12 +240,15 @@ def send_run_notification(summary, index_url, email_cfg):
         f"({devices_passed}/{total_devices} devices passed)"
     )
 
-    msg = MIMEMultipart("alternative")
+    # Build email: outer "mixed" (body + attachments)
+    msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = from_addr
     msg["To"] = ", ".join(recipients)
 
-    # Plain text fallback
+    # Inner "alternative" for plain/HTML body
+    body_part = MIMEMultipart("alternative")
+
     plain = (
         f"DM-NAX Nightly Test Run — {timestamp}\n"
         f"Status: {status}\n"
@@ -167,11 +256,44 @@ def send_run_notification(summary, index_url, email_cfg):
         f"Tests: {summary.get('total_passed', 0)}/{summary.get('total_tests', 0)} passed\n"
         f"\nFull report: {index_url}\n"
     )
-    msg.attach(MIMEText(plain, "plain"))
+    body_part.attach(MIMEText(plain, "plain"))
 
-    # HTML body
     html_body = _build_html_body(summary, index_url)
-    msg.attach(MIMEText(html_body, "html"))
+    body_part.attach(MIMEText(html_body, "html"))
+
+    msg.attach(body_part)
+
+    # Attach per-device test log zips (if enabled)
+    attach_logs = email_cfg.get("attach_logs", False)
+    if attach_logs:
+        max_mb = float(email_cfg.get("max_attachment_mb", 3))
+        max_per_device = int(max_mb * 1_000_000 / max(total_devices, 1))
+        # Cap per-device at 1MB regardless
+        max_per_device = min(max_per_device, 1_000_000)
+
+        total_attached = 0
+        for target in summary.get("targets", []):
+            results_dir = target.get("results_dir")
+            device_name = target.get("target", "unknown")
+            if not results_dir or not Path(results_dir).is_dir():
+                continue
+
+            result = _create_test_logs_zip(results_dir, device_name, max_bytes=max_per_device)
+            if result is None:
+                continue
+
+            zip_data, filename = result
+            total_attached += len(zip_data)
+            if total_attached > max_mb * 1_000_000:
+                logger.warning("Total attachment size exceeds %s MB, skipping remaining", max_mb)
+                break
+
+            part = MIMEBase("application", "zip")
+            part.set_payload(zip_data)
+            encoders.encode_base64(part)
+            part.add_header("Content-Disposition", "attachment", filename=filename)
+            msg.attach(part)
+            logger.info("Attached %s (%d KB)", filename, len(zip_data) // 1024)
 
     try:
         with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
