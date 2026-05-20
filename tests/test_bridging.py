@@ -102,14 +102,14 @@ class TestBridging:
 
         level = dsp.measure_output_level("A1L")
 
-        # Cleanup
-        dsp.clear_sig_route(0)
-        dsp.stop_sig_tone()
-
         assert level > test_settings["mute_floor_db"], (
             f"No signal in Standard mode at Volume=800: {level:.1f} dB"
         )
         dsp.assert_signal_presence(1, expected=True)
+
+        # Cleanup
+        dsp.clear_sig_route(0)
+        dsp.stop_sig_tone()
 
     def test_stereo_output_both_channels(self, dsp, device_cfg, test_settings):
         """Standard mode produces output on both L and R channels."""
