@@ -366,14 +366,24 @@ class TestStreamingCleanup:
     def test_stop_all_players(self, streaming, device_cfg, cresnext):
         """Stop playback and deactivate service on all players.
 
+        Iterates ALL zones in the streaming config (not just selected_zones) so
+        that players started by parametrized tests (TestStreamingLevels,
+        TestStreamingSignalPresence) on non-selected zones are also stopped.
+        For example, in quick mode selected_zones=[1,3,5] but zone 7 may have
+        been started by a parametrized test — without this fix zone 7's player
+        stays running and A7L remains at -70 dB causing false failures.
+
         After stopping players, also clear AvMatrixRouting for every zone so the
         DSP input is severed even if a player's stop() call fails silently (e.g.
         HTTP 5xx or timeout on a DSP1 zone port).  This prevents residual signal
         on DSP1 amp outputs (A5L/A7L) from causing false failures in the silence
         checks that follow.
         """
-        zones = _streaming_zones(device_cfg)
-        for zone in sorted(zones.keys()):
+        # Use the full streaming zone map — not filtered by selected_zones.
+        streaming_cfg = device_cfg.get("streaming", {})
+        all_zones = sorted(int(z) for z in streaming_cfg.get("zones", {}).keys())
+
+        for zone in all_zones:
             player = streaming.get_player(zone)
             player.stop_streaming()
             logger.info("Zone %d: stopped streaming", zone)
@@ -384,7 +394,7 @@ class TestStreamingCleanup:
         # setting AudioSource="" keeps the binding alive on fw42 and the
         # MediaStreamer source continues feeding ~-70 dB noise into the amp
         # output.
-        for zone in sorted(zones.keys()):
+        for zone in all_zones:
             try:
                 cresnext.clear_zone_route(zone)
                 logger.info("Zone %d: CresNext route cleared", zone)
@@ -440,8 +450,9 @@ class TestStreamingCleanup:
 
     def test_clear_routes(self, cresnext, device_cfg):
         """Remove all zone audio source routes (cleanup)."""
-        zones = device_cfg.get("selected_zones", list(range(1, device_cfg.get("zones", 4) + 1)))
-        for z in zones:
+        streaming_cfg = device_cfg.get("streaming", {})
+        all_zones = sorted(int(z) for z in streaming_cfg.get("zones", {}).keys())
+        for z in all_zones:
             try:
                 cresnext.clear_zone_route(z)
             except Exception:
