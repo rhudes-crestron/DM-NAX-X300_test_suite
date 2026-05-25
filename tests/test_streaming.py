@@ -363,7 +363,7 @@ class TestStreamingSignalPresence:
 class TestStreamingCleanup:
     """Phase 6: Stop all streaming and verify silence."""
 
-    def test_stop_all_players(self, streaming, device_cfg, cresnext):
+    def test_stop_all_players(self, streaming, device_cfg, cresnext, dsp):
         """Stop playback and deactivate service on all players.
 
         Iterates ALL zones in the streaming config (not just selected_zones) so
@@ -374,10 +374,17 @@ class TestStreamingCleanup:
         stays running and A7L remains at -70 dB causing false failures.
 
         After stopping players, also clear AvMatrixRouting for every zone so the
-        DSP input is severed even if a player's stop() call fails silently (e.g.
-        HTTP 5xx or timeout on a DSP1 zone port).  This prevents residual signal
-        on DSP1 amp outputs (A5L/A7L) from causing false failures in the silence
-        checks that follow.
+        DSP input is severed even if a player's stop() call fails silently
+        (e.g. HTTP 5xx or timeout on a DSP1 zone port).
+
+        Finally, scrub DSP mixer crosspoints from the signal generator to all
+        amp outputs.  Prior test files (test_signal_routing, test_bridging,
+        test_speaker_protect) call set_mixer / route_sig_to_output but do not
+        always clear the crosspoint at the end of every parametrized case.
+        A leftover ``dsp mix 8 12 0`` (sig_ch DSP1 -> A7L) combined with a
+        residual streaming source on Zone7 keeps A7L at ~-70 dB across the
+        silence checks below — this fails only in the full nightly run, never
+        when TestStreamingCleanup runs alone.
         """
         # Use the full streaming zone map — not filtered by selected_zones.
         streaming_cfg = device_cfg.get("streaming", {})
@@ -388,18 +395,25 @@ class TestStreamingCleanup:
             player.stop_streaming()
             logger.info("Zone %d: stopped streaming", zone)
 
-        # Clear zone sources via CresNext to sever DSP routing regardless of
-        # whether the individual player stop commands succeeded.  Send an
-        # empty-object body so the Zone{N} entry is removed entirely; merely
-        # setting AudioSource="" keeps the binding alive on fw42 and the
-        # MediaStreamer source continues feeding ~-70 dB noise into the amp
-        # output.
+        # Clear zone sources via CresNext individually (one Zone{N} POST per
+        # zone).  Sending an empty-object body removes the Zone{N} entry from
+        # Routes; merely setting AudioSource="" keeps the binding alive on
+        # fw42 and the MediaStreamer source continues feeding ~-70 dB noise
+        # into the amp output.
         for zone in all_zones:
             try:
                 cresnext.clear_zone_route(zone)
                 logger.info("Zone %d: CresNext route cleared", zone)
             except Exception as e:
                 logger.warning("Zone %d: failed to clear CresNext route: %s", zone, e)
+
+        # Scrub DSP signal-generator mixer crosspoints left behind by earlier
+        # test files (test_signal_routing, test_bridging, test_speaker_protect).
+        try:
+            dsp.clear_all_sig_routes()
+            logger.info("DSP signal-generator mixer crosspoints cleared")
+        except Exception as e:
+            logger.warning("Failed to clear DSP sig-gen mixer crosspoints: %s", e)
 
         time.sleep(STOP_SETTLE_S)
 

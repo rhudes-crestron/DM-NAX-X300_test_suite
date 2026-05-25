@@ -343,32 +343,24 @@ class CresNextClient:
         )
 
     def set_zone_sources_streamrouting(self, zone_to_source):
-        """Set multiple zone AudioSource values in one StreamRoutings-style call.
+        """Set multiple zone AudioSource values, one zone at a time.
 
-        Uses parent path and comma-separated zone/source lists (as documented in
-        AP_TestCases StreamRoutings for MP1 on 8-zone platforms).
+        Earlier versions used a comma-joined Routes key
+        (``Routes/Zone1,Zone3,Zone5,Zone7``) but that combined format
+        does not bind cleanly on fw42 MP1 — individual ``Routes/ZoneN``
+        clears later cannot remove the binding, leaving residual
+        MediaStreamer audio (~-70 dB) on the zone's amp output after
+        the player has been stopped.  We now route each zone individually
+        to keep setup and teardown symmetric.
         """
         if not zone_to_source:
             return {}
 
         ordered = sorted((int(z), str(src)) for z, src in zone_to_source.items())
-        zone_csv = ",".join(f"Zone{z}" for z, _ in ordered)
-        source_csv = ",".join(src for _, src in ordered)
-
-        uri = f"/Device/AvMatrixRouting/Routes/{zone_csv}/"
-        body = {
-            "Device": {
-                "AvMatrixRouting": {
-                    "Routes": {
-                        zone_csv: {
-                            "AudioSource": source_csv
-                        }
-                    }
-                }
-            }
-        }
-        logger.info("CresNext SET StreamRoutings %s -> %s", zone_csv, source_csv)
-        return self.set(uri, body)
+        last_resp = None
+        for zone, src in ordered:
+            last_resp = self.set_zone_source(zone, src)
+        return last_resp
 
     # ------------------------------------------------------------------
     # Convenience: Input source properties
