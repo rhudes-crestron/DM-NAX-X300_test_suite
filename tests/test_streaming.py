@@ -70,6 +70,7 @@ import logging
 
 from lib.generate_tones import tone_filename
 from lib.streaming_client import detect_mediaplayermode, MODE_MP1
+from lib.test_trace import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -146,21 +147,111 @@ def _resolve_stream_audio_source(device_cfg, zone_num, default_input, mode):
 
 
 def _apply_stream_routes(cresnext, device_cfg, zones, mode):
-    """Apply zone->AudioSource routing with MP1-specific StreamRoutings path."""
+    """Apply zone->AudioSource routing with MP1-specific source mapping."""
     model = str(device_cfg.get("model", "")).upper()
     if mode == MODE_MP1 and model in {"8ZSA", "4ZSP"}:
-        mapping = {}
         for zone, zcfg in sorted(zones.items()):
-            mapping[zone] = _resolve_stream_audio_source(device_cfg, zone, zcfg["input"], mode)
-        cresnext.set_zone_sources_streamrouting(mapping)
-        for zone, src in sorted(mapping.items()):
-            logger.info("Routed Zone %d -> %s (MP1 StreamRoutings)", zone, src)
+            src = _resolve_stream_audio_source(device_cfg, zone, zcfg["input"], mode)
+            cresnext.set_zone_source(zone, src)
+            log_event("ROUTE", f"Zone{zone}: individual route -> {src} (mode={mode})")
+            logger.info("Routed Zone %d -> %s (MP1 individual route)", zone, src)
         return
 
     for zone, zcfg in sorted(zones.items()):
         input_name = _resolve_stream_audio_source(device_cfg, zone, zcfg["input"], mode)
         cresnext.set_zone_source(zone, input_name)
+        log_event("ROUTE", f"Zone{zone}: individual route -> {input_name} (mode={mode})")
         logger.info("Routed Zone %d -> %s", zone, input_name)
+
+
+def _fmt_db(level):
+    if level == float("-inf"):
+        return "-inf"
+    return f"{level:.2f}dB"
+
+
+def _summarize_player_status(status):
+    payload = status.get("payload", {}) if isinstance(status, dict) else {}
+    player = payload.get("player", {}) if isinstance(payload, dict) else {}
+    state = player.get("state", {}) if isinstance(player, dict) else {}
+    status_info = player.get("status", {}) if isinstance(player, dict) else {}
+    timer = player.get("timer", {}) if isinstance(player, dict) else {}
+    return (
+        f"state={state.get('name', 'UNKNOWN')}({state.get('value', 'n/a')}) "
+        f"pid={player.get('pid', 'n/a')} elapsed={timer.get('elapsed', 'n/a')} "
+        f"source={payload.get('source', 'n/a')} "
+        f"code={status_info.get('code', 'n/a')} retry={status_info.get('retry', 'n/a')}"
+    )
+
+
+def _log_mixer_diagnostics(label, dsp, device_cfg):
+    """Log active signal-generator mixer crosspoints for root-cause analysis."""
+    try:
+        nodes = dsp.read_mixer_state()
+        sig_inputs = [int(device_cfg["signal_generator"]["channel"])]
+        dsp1 = device_cfg.get("signal_generator_dsp1")
+        if dsp1:
+            sig_inputs.append(int(dsp1["channel"]))
+        active = [
+            f"in{n.input_idx}:{n.input_name}->out{n.output_idx}:{n.output_name}@{n.gain_db:.1f}"
+            for n in nodes
+            if n.input_idx in sig_inputs and n.gain_db > -190.0
+        ]
+        log_event("DIAG", f"{label}: active_sig_mixer_routes={active if active else 'none'}")
+    except Exception as e:
+        log_event("DIAG", f"{label}: mixer_diag_error={e}")
+
+
+def _log_streaming_cleanup_diagnostics(label, streaming, cresnext, dsp, device_cfg, zones):
+    """Capture player/route/DSP/mixer state around cleanup and on failures.
+
+    This is intentionally verbose for fw42 Zone7 failures.  If A7L remains
+    around -70 dB, these lines show whether the cause is a still-running
+    player, stale AvMatrixRouting route, or stale DSP signal-generator mixer
+    crosspoint from earlier test files.
+    """
+    selected = sorted(int(z) for z in device_cfg.get("selected_zones", []))
+    log_event(
+        "DIAG",
+        f"{label}: mode={getattr(streaming, 'mode', 'unknown')} "
+        f"selected_zones={selected} diag_zones={zones}",
+    )
+
+    for zone in zones:
+        player = streaming.get_player(zone)
+        try:
+            status = player.status()
+            player_summary = _summarize_player_status(status)
+        except Exception as e:
+            player_summary = f"status_error={e}"
+        try:
+            route = cresnext.get_zone_source(zone)
+        except Exception as e:
+            route = f"route_error={e}"
+        log_event(
+            "DIAG",
+            f"{label}: Zone{zone} port={player.port} route={route} {player_summary}",
+        )
+
+    try:
+        names = []
+        for zone in zones:
+            left, right = _streaming_inputs_for_zone(zone, device_cfg)
+            names.extend([left, right])
+        state = dsp.read_dsp_state()
+        levels = []
+        for name in names:
+            if name in state.outputs:
+                levels.append(f"{name}={_fmt_db(state.outputs[name].output_db)}")
+            elif name in state.inputs:
+                levels.append(f"{name}={_fmt_db(state.inputs[name].level_db)}")
+            else:
+                levels.append(f"{name}=missing")
+        log_event("DIAG", f"{label}: dsp_levels {' | '.join(levels)}")
+    except Exception as e:
+        log_event("DIAG", f"{label}: dsp_diag_error={e}")
+
+    _log_mixer_diagnostics(label, dsp, device_cfg)
 
 
 class TestStreamingRouting:
@@ -267,9 +358,11 @@ class TestStreamingLevels:
         # Ensure route and volume are set
         input_name = _resolve_stream_audio_source(device_cfg, zone_num, zcfg["input"], streaming.mode)
         if streaming.mode == MODE_MP1 and str(device_cfg.get("model", "")).upper() in {"8ZSA", "4ZSP"}:
-            cresnext.set_zone_sources_streamrouting({zone_num: input_name})
+            cresnext.set_zone_source(zone_num, input_name)
+            log_event("ROUTE", f"Zone{zone_num}: individual route -> {input_name} (level check)")
         else:
             cresnext.set_zone_source(zone_num, input_name)
+            log_event("ROUTE", f"Zone{zone_num}: individual route -> {input_name} (level check)")
         cresnext.set_zone_audio(zone_num, Volume=800, IsMuted=False)
 
         # Ensure player is playing
@@ -389,11 +482,21 @@ class TestStreamingCleanup:
         # Use the full streaming zone map — not filtered by selected_zones.
         streaming_cfg = device_cfg.get("streaming", {})
         all_zones = sorted(int(z) for z in streaming_cfg.get("zones", {}).keys())
+        selected_zones = sorted(int(z) for z in device_cfg.get("selected_zones", all_zones))
+        diag_zones = sorted(set(selected_zones) | {7}) if 7 in all_zones else selected_zones
+
+        _log_streaming_cleanup_diagnostics(
+            "before_stop_all_players", streaming, cresnext, dsp, device_cfg, diag_zones
+        )
 
         for zone in all_zones:
             player = streaming.get_player(zone)
             player.stop_streaming()
             logger.info("Zone %d: stopped streaming", zone)
+
+        _log_streaming_cleanup_diagnostics(
+            "after_player_stop_before_route_clear", streaming, cresnext, dsp, device_cfg, diag_zones
+        )
 
         # Clear zone sources via CresNext individually (one Zone{N} POST per
         # zone).  Sending an empty-object body removes the Zone{N} entry from
@@ -407,6 +510,10 @@ class TestStreamingCleanup:
             except Exception as e:
                 logger.warning("Zone %d: failed to clear CresNext route: %s", zone, e)
 
+        _log_streaming_cleanup_diagnostics(
+            "after_route_clear_before_mixer_scrub", streaming, cresnext, dsp, device_cfg, diag_zones
+        )
+
         # Scrub DSP signal-generator mixer crosspoints left behind by earlier
         # test files (test_signal_routing, test_bridging, test_speaker_protect).
         try:
@@ -415,14 +522,27 @@ class TestStreamingCleanup:
         except Exception as e:
             logger.warning("Failed to clear DSP sig-gen mixer crosspoints: %s", e)
 
+        _log_streaming_cleanup_diagnostics(
+            "after_mixer_scrub_before_settle", streaming, cresnext, dsp, device_cfg, diag_zones
+        )
+
         time.sleep(STOP_SETTLE_S)
 
-    def test_silence_after_stop(self, dsp, device_cfg):
+        _log_streaming_cleanup_diagnostics(
+            "after_stop_settle", streaming, cresnext, dsp, device_cfg, diag_zones
+        )
+
+    def test_silence_after_stop(self, dsp, device_cfg, streaming, cresnext):
         """All streaming measurement points must be silent after streaming stops."""
         zones = device_cfg.get("selected_zones", list(range(1, device_cfg.get("zones", 4) + 1)))
         for z in zones:
             left, right = _streaming_inputs_for_zone(z, device_cfg)
             level_l = _measure_streaming_level(dsp, left, device_cfg, settle_time=1.0)
+            if level_l >= SILENCE_FLOOR_DB:
+                _log_streaming_cleanup_diagnostics(
+                    f"silence_failure_zone{z}", streaming, cresnext, dsp,
+                    device_cfg=device_cfg, zones=[z]
+                )
             assert level_l < SILENCE_FLOOR_DB, (
                 f"Zone {z} {left} still has signal after stop: {level_l:.2f} dB"
             )
@@ -434,6 +554,11 @@ class TestStreamingCleanup:
         for zone_num in sorted(zones.keys()):
             # Player should not be PLAYING
             player = streaming.get_player(zone_num)
+            if player.is_playing:
+                _log_streaming_cleanup_diagnostics(
+                    f"player_still_playing_zone{zone_num}", streaming, cresnext, dsp,
+                    device_cfg=device_cfg, zones=[zone_num]
+                )
             assert not player.is_playing, (
                 f"Zone {zone_num}: player still PLAYING after stop"
             )
@@ -441,6 +566,11 @@ class TestStreamingCleanup:
             # DSP mux should be silent
             left, _ = _streaming_inputs_for_zone(zone_num, device_cfg)
             level = _measure_streaming_level(dsp, left, device_cfg, settle_time=1.0)
+            if level >= SILENCE_FLOOR_DB:
+                _log_streaming_cleanup_diagnostics(
+                    f"signal_absent_level_failure_zone{zone_num}", streaming, cresnext, dsp,
+                    device_cfg=device_cfg, zones=[zone_num]
+                )
             assert level < SILENCE_FLOOR_DB, (
                 f"Zone {zone_num}: DSP mux {left} still has signal "
                 f"({level:.2f} dB) after stop"
@@ -451,6 +581,11 @@ class TestStreamingCleanup:
             detected = zone_info.get("IsSignalDetected", None)
             clipping = zone_info.get("IsSignalClipping", None)
 
+            if detected is not False:
+                _log_streaming_cleanup_diagnostics(
+                    f"signal_detected_failure_zone{zone_num}", streaming, cresnext, dsp,
+                    device_cfg=device_cfg, zones=[zone_num]
+                )
             assert detected is False, (
                 f"Zone {zone_num}: IsSignalDetected is {detected} after stop, "
                 "expected False"
