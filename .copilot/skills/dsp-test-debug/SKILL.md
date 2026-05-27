@@ -26,8 +26,13 @@ Read these for full context before debugging:
 
 ## Build Server Results Access
 
+**Always review results on the build server, not locally.** Unless the user explicitly says "local results", all result analysis must use `/opt/dmnax-test-suite/results/` on `Nj6v-docker-04`.
+
+Before running any SSH command to the build server, prompt the user:
+> "Please provide the password for builduser@Nj6v-docker-04."
+
 ```bash
-# SSH to build server
+# SSH to build server (prompt user for password first)
 ssh builduser@Nj6v-docker-04
 
 # Latest results

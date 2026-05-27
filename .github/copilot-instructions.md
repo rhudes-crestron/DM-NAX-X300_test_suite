@@ -9,11 +9,17 @@
 ## Build Server
 
 - **Host:** `Nj6v-docker-04`
-- **User:** `builduser` (password auth)
+- **User:** `builduser` (password auth — prompt user for password before each SSH session)
 - **Test suite path:** `/opt/dmnax-test-suite/`
 - **Nightly results:** `/opt/dmnax-test-suite/results/YYYY-MM-DD_HH-MM-SS_<DEVICE>/`
 - **Nightly schedule:** 05:00 daily via systemd timer
 - **Deploy:** `cd /opt/dmnax-test-suite && git pull`
+
+### ALWAYS review test results on the build server
+
+**Unless the user explicitly says "local results" or "local run", ALL result reviews must be done on the build server at `/opt/dmnax-test-suite/results/`.** Never read from the local `results/` folder for nightly analysis.
+
+**Before every SSH session to the build server, prompt the user:** _"Please provide the password for builduser@Nj6v-docker-04."_ Do not guess or reuse passwords from context.
 
 ## Device Under Test (DM-NAX-8ZSA)
 
