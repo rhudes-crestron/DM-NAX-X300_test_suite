@@ -202,6 +202,103 @@ def _log_mixer_diagnostics(label, dsp, device_cfg):
         log_event("DIAG", f"{label}: mixer_diag_error={e}")
 
 
+def _log_zone7_dsp_pipeline(label, dsp, device_cfg):
+    """Capture the full DSP processing pipeline state for Zone 7.
+
+    Logs every gain stage, ducker, limiter, AGC, route source, and the raw
+    streaming input level.  This helps identify whether the -70 dB residual
+    after streaming stop comes from a still-active ALSA/GStreamer pipeline
+    feeding the I2S bus, or from the amp output stage itself.
+    """
+    try:
+        # Zone 7 on 8ZSA = channels 12 (left) and 13 (right) globally,
+        # which map to DSP1 ch4/ch5 locally.
+        streaming_cfg = device_cfg.get("streaming", {})
+        zone7_input = streaming_cfg.get("zones", {}).get(7, {}).get("input", "Input11")
+
+        # 1. All gain types for Zone 7 left (ch12)
+        gain_types = [
+            (0, "input"), (1, "output"), (2, "extra"), (3, "rava"),
+            (4, "lineout"), (5, "emergency"), (6, "balance"), (7, "outputTrim"),
+        ]
+        gain_results = []
+        for gtype, gname in gain_types:
+            try:
+                out = dsp.ssh.execute(f"dsp gain 12 {gtype}", timeout=5)
+                # Extract the dB value from output like "Get gain dsp 1, chan 4, cmd 40002, gain    0.00 dB"
+                gain_results.append(f"{gname}={out.strip().split('gain')[-1].strip() if 'gain' in out else out.strip()}")
+            except Exception:
+                gain_results.append(f"{gname}=err")
+        log_event("DIAG", f"{label}: zone7_gains ch12: {' | '.join(gain_results)}")
+
+        # 2. Route source for Zone 7 left
+        try:
+            route_out = dsp.ssh.execute("dsp route 12", timeout=5)
+            log_event("DIAG", f"{label}: zone7_route ch12: {route_out.strip()}")
+        except Exception as e:
+            log_event("DIAG", f"{label}: zone7_route_err: {e}")
+
+        # 3. Ducker VU level (shows signal entering the output chain)
+        try:
+            duc_out = dsp.ssh.execute("dsp duc 12", timeout=5)
+            # Extract vu_level line
+            for line in duc_out.splitlines():
+                if "vu_level" in line:
+                    log_event("DIAG", f"{label}: zone7_ducker_vu: {line.strip()}")
+                    break
+        except Exception as e:
+            log_event("DIAG", f"{label}: zone7_duc_err: {e}")
+
+        # 4. Limiter VU level
+        try:
+            lim_out = dsp.ssh.execute("dsp lim 12", timeout=5)
+            for line in lim_out.splitlines():
+                if "vu_level" in line:
+                    log_event("DIAG", f"{label}: zone7_limiter_vu: {line.strip()}")
+                    break
+        except Exception as e:
+            log_event("DIAG", f"{label}: zone7_lim_err: {e}")
+
+        # 5. Check if streaming ALSA PCM devices are still open (GStreamer leak)
+        try:
+            pcm_out = dsp.ssh.execute("cat /proc/asound/pcm 2>/dev/null || echo N/A", timeout=5)
+            log_event("DIAG", f"{label}: zone7_alsa_pcm: {pcm_out.strip()[:200]}")
+        except Exception:
+            pass
+
+        # 6. Check ALSA playback substreams for zone 7 (hw:1,6 or similar)
+        try:
+            sub_out = dsp.ssh.execute(
+                "find /proc/asound -name 'sub*' -path '*/pcm*p/sub*' "
+                "-exec sh -c 'echo {}:; cat {}/status 2>/dev/null | head -3' \\; 2>/dev/null | "
+                "grep -A2 'RUNNING\\|PREPARED' || echo 'all_closed'",
+                timeout=10
+            )
+            log_event("DIAG", f"{label}: zone7_alsa_substreams: {sub_out.strip()[:300]}")
+        except Exception:
+            pass
+
+        # 7. Raw input peak for the streaming input that was feeding zone 7
+        #    On 8ZSA fw42: Input11 = streaming zone 7. Check its raw level.
+        try:
+            # The full DSP state table shows RAW input levels
+            state = dsp.read_dsp_state()
+            # Find the raw input level for the streaming input name
+            raw_info = []
+            for name, inp in state.inputs.items():
+                if "11" in name or "M7" in name or "N7" in name:
+                    raw_info.append(f"{name}={_fmt_db(inp.level_db)}")
+            if raw_info:
+                log_event("DIAG", f"{label}: zone7_raw_inputs: {' | '.join(raw_info)}")
+            else:
+                log_event("DIAG", f"{label}: zone7_raw_inputs: not_found_in_state")
+        except Exception as e:
+            log_event("DIAG", f"{label}: zone7_raw_input_err: {e}")
+
+    except Exception as e:
+        log_event("DIAG", f"{label}: zone7_pipeline_error: {e}")
+
+
 def _log_streaming_cleanup_diagnostics(label, streaming, cresnext, dsp, device_cfg, zones):
     """Capture player/route/DSP/mixer state around cleanup and on failures.
 
@@ -546,6 +643,9 @@ class TestStreamingCleanup:
                 level_l_post = _measure_streaming_level(dsp, left, device_cfg, settle_time=1.0)
                 logger.info("Zone 7: level after extra wait: %.2f dB", level_l_post)
                 if level_l_post >= SILENCE_FLOOR_DB:
+                    _log_zone7_dsp_pipeline(
+                        "silence_failure_zone7_pipeline", dsp, device_cfg
+                    )
                     _log_streaming_cleanup_diagnostics(
                         f"silence_failure_zone7_after_extra_wait", streaming, cresnext, dsp,
                         device_cfg=device_cfg, zones=[z]
