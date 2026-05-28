@@ -259,24 +259,36 @@ def _log_zone7_dsp_pipeline(label, dsp, device_cfg):
         except Exception as e:
             log_event("DIAG", f"{label}: zone7_lim_err: {e}")
 
-        # 5. Check if streaming ALSA PCM devices are still open (GStreamer leak)
+        # 5. Check ALSA Loopback PCM substream states via bash shell (port 6022).
+        #    Loopback card1 has 8 playback substreams (pcm0p/sub0-7 and pcm1p/sub0-7)
+        #    mapping one-to-one to MediaStreamer zones.  Zone 7 = sub6 on one of these.
+        #    Commands 5+6 MUST use execute_bash (port 6022), NOT execute (port 22 CresNEXT CLI).
         try:
-            pcm_out = dsp.ssh.execute("cat /proc/asound/pcm 2>/dev/null || echo N/A", timeout=5)
-            log_event("DIAG", f"{label}: zone7_alsa_pcm: {pcm_out.strip()[:200]}")
-        except Exception:
-            pass
-
-        # 6. Check ALSA playback substreams for zone 7 (hw:1,6 or similar)
-        try:
-            sub_out = dsp.ssh.execute(
-                "find /proc/asound -name 'sub*' -path '*/pcm*p/sub*' "
-                "-exec sh -c 'echo {}:; cat {}/status 2>/dev/null | head -3' \\; 2>/dev/null | "
-                "grep -A2 'RUNNING\\|PREPARED' || echo 'all_closed'",
-                timeout=10
+            sub_out = dsp.ssh.execute_bash(
+                'out=""; '
+                'for f in $(find /proc/asound/card1 -name "status" | sort); do '
+                '  st=$(cat "$f" 2>/dev/null); '
+                '  [ "$st" != "closed" ] && out="$out $f:$st"; '
+                'done; '
+                'echo "${out:-all_closed}"',
+                timeout=15,
             )
-            log_event("DIAG", f"{label}: zone7_alsa_substreams: {sub_out.strip()[:300]}")
-        except Exception:
-            pass
+            log_event("DIAG", f"{label}: zone7_alsa_loopback_open: {sub_out.strip()[:400]}")
+        except Exception as e:
+            log_event("DIAG", f"{label}: zone7_alsa_loopback_err: {e}")
+
+        # 6. Check which PIDs have /dev/snd fds open (identifies stuck GStreamer pipelines)
+        try:
+            snd_pids = dsp.ssh.execute_bash(
+                'for pid in $(ls /proc/ | grep "^[0-9]"); do '
+                '  fds=$(ls -la /proc/$pid/fd 2>/dev/null | grep "/dev/snd"); '
+                '  [ -n "$fds" ] && echo "pid=$pid cmd=$(cat /proc/$pid/comm 2>/dev/null): $fds"; '
+                'done || echo "none"',
+                timeout=15,
+            )
+            log_event("DIAG", f"{label}: zone7_snd_open_pids: {snd_pids.strip()[:400] if snd_pids.strip() else 'none'}")
+        except Exception as e:
+            log_event("DIAG", f"{label}: zone7_snd_pids_err: {e}")
 
         # 7. Raw input peak for the streaming input that was feeding zone 7
         #    On 8ZSA fw42: Input11 = streaming zone 7. Check its raw level.
