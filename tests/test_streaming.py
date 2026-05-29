@@ -311,6 +311,67 @@ def _log_zone7_dsp_pipeline(label, dsp, device_cfg):
         log_event("DIAG", f"{label}: zone7_pipeline_error: {e}")
 
 
+def deep_zone7_diagnostics(dsp, device_cfg, streaming=None, cresnext=None, poll_secs=30, interval=2):
+    """Poll and log Zone 7 and Zone 1 DSP/ALSA state every interval seconds for poll_secs after STOP."""
+    import time
+    zone_good = 1
+    zone_bad = 7
+    n_polls = poll_secs // interval
+    logger = globals().get("logger", None)
+    for i in range(n_polls):
+        label = f"deep_diag_zone7_poll{i+1:02d}"
+        # Log full pipeline for both zones
+        _log_zone7_dsp_pipeline(label+"_zone7", dsp, device_cfg)
+        # For Zone 1, log same DSP state as for Zone 7
+        try:
+            gain_types = [ (0, "input"), (1, "output"), (2, "extra"), (3, "rava"), (4, "lineout"), (5, "emergency"), (6, "balance"), (7, "outputTrim") ]
+            gain_results = []
+            for gtype, gname in gain_types:
+                try:
+                    out = dsp.ssh.execute(f"dsp gain 1 {gtype}", timeout=5)
+                    gain_results.append(f"{gname}={out.strip().split('gain')[-1].strip() if 'gain' in out else out.strip()}")
+                except Exception:
+                    gain_results.append(f"{gname}=err")
+            log_event("DIAG", f"{label}_zone1: zone1_gains ch1: {' | '.join(gain_results)}")
+            route_out = dsp.ssh.execute("dsp route 1", timeout=5)
+            log_event("DIAG", f"{label}_zone1: zone1_route ch1: {route_out.strip()}")
+            duc_out = dsp.ssh.execute("dsp duc 1", timeout=5)
+            for line in duc_out.splitlines():
+                if "vu_level" in line:
+                    log_event("DIAG", f"{label}_zone1: zone1_ducker_vu: {line.strip()}")
+                    break
+            lim_out = dsp.ssh.execute("dsp lim 1", timeout=5)
+            for line in lim_out.splitlines():
+                if "vu_level" in line:
+                    log_event("DIAG", f"{label}_zone1: zone1_limiter_vu: {line.strip()}")
+                    break
+        except Exception as e:
+            log_event("DIAG", f"{label}_zone1: zone1_diag_error: {e}")
+        # Log ALSA substream status for both zones
+        try:
+            sub7 = dsp.ssh.execute_bash('cat /proc/asound/card1/pcm0p/sub6/status 2>/dev/null || echo missing', timeout=5)
+            sub1 = dsp.ssh.execute_bash('cat /proc/asound/card1/pcm0p/sub0/status 2>/dev/null || echo missing', timeout=5)
+            log_event("DIAG", f"{label}: alsa_zone7_sub6_status: {sub7.strip()}")
+            log_event("DIAG", f"{label}: alsa_zone1_sub0_status: {sub1.strip()}")
+        except Exception as e:
+            log_event("DIAG", f"{label}: alsa_substream_diag_error: {e}")
+        # Log open /dev/snd PIDs
+        try:
+            snd_pids = dsp.ssh.execute_bash(
+                'for pid in $(ls /proc/ | grep "^[0-9]"); do '
+                '  fds=$(ls -la /proc/$pid/fd 2>/dev/null | grep "/dev/snd"); '
+                '  [ -n "$fds" ] && echo "pid=$pid cmd=$(cat /proc/$pid/comm 2>/dev/null): $fds"; '
+                'done || echo "none"',
+                timeout=10,
+            )
+            log_event("DIAG", f"{label}: snd_open_pids: {snd_pids.strip()[:400] if snd_pids.strip() else 'none'}")
+        except Exception as e:
+            log_event("DIAG", f"{label}: snd_pids_diag_error: {e}")
+        if logger:
+            logger.info(f"Deep diag poll {i+1}/{n_polls} complete.")
+        time.sleep(interval)
+
+
 def _log_streaming_cleanup_diagnostics(label, streaming, cresnext, dsp, device_cfg, zones):
     """Capture player/route/DSP/mixer state around cleanup and on failures.
 
@@ -655,6 +716,8 @@ class TestStreamingCleanup:
                 level_l_post = _measure_streaming_level(dsp, left, device_cfg, settle_time=1.0)
                 logger.info("Zone 7: level after extra wait: %.2f dB", level_l_post)
                 if level_l_post >= SILENCE_FLOOR_DB:
+                    logger.info("Zone 7: triggering deep diagnostics after STOP residual detected...")
+                    deep_zone7_diagnostics(dsp, device_cfg, streaming=streaming, cresnext=cresnext, poll_secs=30, interval=2)
                     _log_zone7_dsp_pipeline(
                         "silence_failure_zone7_pipeline", dsp, device_cfg
                     )
