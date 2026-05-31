@@ -56,12 +56,20 @@ nightly_testing/dsp_test_suite/
 ```bash
 cd /home/builduser/Linux_jstr1000/nightly_testing/dsp_test_suite
 
-# Install Python dependencies (only needed once)
-pip3 install -r requirements.txt
+# Create and activate the virtual environment (only needed once)
+python3 -m venv venv
+source venv/bin/activate
+
+# Install Python dependencies (only needed once, inside the venv)
+pip install -r requirements.txt
 ```
 
-All commands below assume the working directory is the suite root above.
-The device under test must be reachable on the network (SSH port 22, HTTPS port 443).
+All commands below assume:
+1. The working directory is the suite root above.
+2. **The venv is activated** (`source venv/bin/activate`) before running any `python3 -m pytest` command, OR you prefix each command with `source venv/bin/activate &&`.
+3. The device under test must be reachable on the network (SSH port 22, HTTPS port 443).
+
+> **On the build server** (`Nj6v-docker-04`), the venv already exists at `/opt/dmnax-test-suite/venv/`. Activate with `source /opt/dmnax-test-suite/venv/bin/activate`.
 
 ---
 
@@ -89,21 +97,29 @@ The fastest way to iterate on a specific test during development.
 ### Run one test function
 
 ```bash
-pytest tests/test_eq.py::TestEQ::test_eq_affects_output_level \
+source venv/bin/activate && python3 -m pytest tests/test_eq.py::TestEQ::test_eq_affects_output_level \
     --device DM-NAX-8ZSA --config config/devices.yaml -v
 ```
 
 ### Run one test class
 
 ```bash
-pytest tests/test_balance.py::TestBalance \
+source venv/bin/activate && python3 -m pytest tests/test_balance.py::TestBalance \
     --device DM-NAX-8ZSA --config config/devices.yaml -v
 ```
 
 ### Run one entire test file
 
 ```bash
-pytest tests/test_signal_routing.py \
+source venv/bin/activate && python3 -m pytest tests/test_signal_routing.py \
+    --device DM-NAX-8ZSA --config config/devices.yaml -v
+```
+
+### Run several test files together (e.g. bridging + speaker protect + streaming)
+
+```bash
+source venv/bin/activate && python3 -m pytest \
+    tests/test_bridging.py tests/test_speaker_protect.py tests/test_streaming.py \
     --device DM-NAX-8ZSA --config config/devices.yaml -v
 ```
 
@@ -111,7 +127,7 @@ pytest tests/test_signal_routing.py \
 
 ```bash
 # DM-NAX-4ZSA
-pytest tests/test_signal_routing.py \
+source venv/bin/activate && python3 -m pytest tests/test_signal_routing.py \
     --device DM-NAX-4ZSA --config config/devices.yaml \
     --json-report --json-report-file=results/routing_4zsa.json -v && \
 python3 -c "
@@ -124,7 +140,7 @@ print('Report: results/routing_4zsa.html')
 "
 
 # DM-NAX-8ZSA
-pytest tests/test_signal_routing.py \
+source venv/bin/activate && python3 -m pytest tests/test_signal_routing.py \
     --device DM-NAX-8ZSA --config config/devices.yaml \
     --json-report --json-report-file=results/routing_8zsa.json -v && \
 python3 -c "
@@ -140,22 +156,15 @@ print('Report: results/routing_8zsa.html')
 The `&&` ensures the report is only generated if pytest exits with code 0 (all tests passed).
 To generate the report even when tests fail, replace `&&` with `;`.
 
-### Run several test files together
-
-```bash
-pytest tests/test_eq.py tests/test_balance.py \
-    --device DM-NAX-8ZSA --config config/devices.yaml -v
-```
-
 ### Run the same test on a different device
 
 Just change `--device`:
 
 ```bash
-pytest tests/test_eq.py \
+source venv/bin/activate && python3 -m pytest tests/test_eq.py \
     --device DM-NAX-4ZSA --config config/devices.yaml -v
 
-pytest tests/test_eq.py \
+source venv/bin/activate && python3 -m pytest tests/test_eq.py \
     --device DM-NAX-4ZSP --config config/devices.yaml -v
 ```
 
@@ -170,17 +179,17 @@ firmware upgrade test:
 
 ```bash
 # DM-NAX-4ZSA  (fw21)
-pytest tests/ --ignore=tests/test_device_upgrade.py \
+source venv/bin/activate && python3 -m pytest tests/ --ignore=tests/test_device_upgrade.py \
     --device DM-NAX-4ZSA --config config/devices.yaml \
     --zone-mode full -v
 
 # DM-NAX-8ZSA  (fw42)
-pytest tests/ --ignore=tests/test_device_upgrade.py \
+source venv/bin/activate && python3 -m pytest tests/ --ignore=tests/test_device_upgrade.py \
     --device DM-NAX-8ZSA --config config/devices.yaml \
     --zone-mode full -v
 
 # DM-NAX-4ZSP  (fw42)
-pytest tests/ --ignore=tests/test_device_upgrade.py \
+source venv/bin/activate && python3 -m pytest tests/ --ignore=tests/test_device_upgrade.py \
     --device DM-NAX-4ZSP --config config/devices.yaml \
     --zone-mode full -v
 ```
@@ -231,17 +240,17 @@ in parametrized tests (e.g. volume, balance, EQ, routing).
 
 ```bash
 # Full run — all 8 zones on 8ZSA
-pytest tests/ --ignore=tests/test_device_upgrade.py \
+source venv/bin/activate && python3 -m pytest tests/ --ignore=tests/test_device_upgrade.py \
     --device DM-NAX-8ZSA --config config/devices.yaml \
     --zone-mode full
 
 # Quick run — zones 2,4,5,8 only (faster for CI smoke check)
-pytest tests/ --ignore=tests/test_device_upgrade.py \
+source venv/bin/activate && python3 -m pytest tests/ --ignore=tests/test_device_upgrade.py \
     --device DM-NAX-8ZSA --config config/devices.yaml \
     --zone-mode quick
 
 # Explicit zones
-pytest tests/ --ignore=tests/test_device_upgrade.py \
+source venv/bin/activate && python3 -m pytest tests/ --ignore=tests/test_device_upgrade.py \
     --device DM-NAX-8ZSA --config config/devices.yaml \
     --zones 1,3,7
 ```
