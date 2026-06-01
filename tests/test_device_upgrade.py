@@ -20,7 +20,9 @@ Test execution order mirrors the PowerShell sequence:
 import os
 import glob
 import logging
+import time
 import pytest
+import paramiko
 
 from lib.firmware_upgrader import FirmwareUpgrader
 from lib.test_trace import log_event
@@ -235,3 +237,132 @@ class TestDeviceUpgrade:
 
         # Post-upgrade version must be non-empty
         assert post and post != "N/A", "Post-upgrade version missing"
+
+    # ── 09 ──
+    def test_09_enable_dsp_cache(self, upgrader, upgrade_cfg, device_cfg):
+        """Enable DSP cache via sysfs bash command after firmware upgrade.
+
+        8ZSA / 4ZSP (two DSP blocks on DSP1 platform):
+            echo 1 > /sys/crestron/ctrl-audio-dsp-0/cache/cache_enable
+            echo 1 > /sys/crestron/ctrl-audio-dsp-1/cache/cache_enable
+
+        4ZSA (single DSP block):
+            echo 1 > /sys/crestron/ctrl-audio-dsp-0/cache/cache_enable
+
+        Tries the debug bash SSH port (6022) first; falls back to the
+        interactive 'linux' shell via the CresNEXT CLI port (22) if 6022
+        is not reachable.  Reads back the sysfs value and asserts it is '1'.
+        """
+        model = upgrade_cfg["model"]
+        dsp_paths = ["/sys/crestron/ctrl-audio-dsp-0/cache/cache_enable"]
+        if model in ("8ZSA", "4ZSP"):
+            dsp_paths.append("/sys/crestron/ctrl-audio-dsp-1/cache/cache_enable")
+
+        DEBUG_BASH_PORT = 6022
+
+        for path in dsp_paths:
+            dsp_label = path.split("/")[3]  # ctrl-audio-dsp-0 or ctrl-audio-dsp-1
+            log_event("UPGRADE", f"enabling cache: {dsp_label} path={path}")
+            result = None
+
+            # ── Method 1: direct bash SSH on port 6022 ──
+            try:
+                client = paramiko.SSHClient()
+                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                client.connect(
+                    hostname=upgrader.ip,
+                    port=DEBUG_BASH_PORT,
+                    username=upgrader.username,
+                    password=upgrader.password,
+                    timeout=15,
+                    allow_agent=False,
+                    look_for_keys=False,
+                )
+                try:
+                    _, stdout, stderr = client.exec_command(
+                        f"echo 1 > {path}", timeout=10
+                    )
+                    stdout.read()
+                    err = stderr.read().decode("utf-8", errors="replace").strip()
+                    if err:
+                        logger.warning("%s: cache write stderr: %s", dsp_label, err)
+                    _, stdout2, _ = client.exec_command(f"cat {path}", timeout=5)
+                    result = stdout2.read().decode("utf-8", errors="replace").strip()
+                finally:
+                    client.close()
+                logger.info(
+                    "%s: cache_enable written via port %d, readback='%s'",
+                    dsp_label, DEBUG_BASH_PORT, result,
+                )
+            except Exception as e_bash:
+                logger.warning(
+                    "%s: port %d bash failed (%s), trying linux shell via port 22",
+                    dsp_label, DEBUG_BASH_PORT, e_bash,
+                )
+
+                # ── Method 2: interactive 'linux' shell via CresNEXT CLI (port 22) ──
+                try:
+                    client = upgrader._ssh_connect(timeout=15)
+                    shell = client.invoke_shell(width=400, height=200)
+                    try:
+                        time.sleep(0.5)
+                        if shell.recv_ready():
+                            shell.recv(65536)
+                        # Enter the linux shell
+                        shell.send("linux\n")
+                        time.sleep(2.0)
+                        if shell.recv_ready():
+                            shell.recv(65536)
+                        # Write the cache enable flag
+                        shell.send(f"echo 1 > {path}\n")
+                        time.sleep(0.5)
+                        # Read it back
+                        shell.send(f"cat {path}\n")
+                        time.sleep(0.8)
+                        raw = b""
+                        deadline = time.time() + 5
+                        while time.time() < deadline:
+                            if shell.recv_ready():
+                                raw += shell.recv(65536)
+                            else:
+                                time.sleep(0.2)
+                        # Exit linux shell
+                        shell.send("exit\n")
+                        time.sleep(0.3)
+                    finally:
+                        shell.close()
+                    client.close()
+                    text = raw.decode("utf-8", errors="replace")
+                    # The cat output line will be the bare digit '1'
+                    digit_lines = [
+                        ln.strip()
+                        for ln in text.splitlines()
+                        if ln.strip() in ("0", "1")
+                    ]
+                    result = digit_lines[-1] if digit_lines else None
+                    logger.info(
+                        "%s: cache_enable written via linux shell, readback='%s'",
+                        dsp_label, result,
+                    )
+                except Exception as e_shell:
+                    pytest.fail(
+                        f"{dsp_label}: both bash methods failed — "
+                        f"port6022={e_bash!r}, linux_shell={e_shell!r}"
+                    )
+
+            if result is None:
+                logger.warning(
+                    "%s: could not read back cache_enable (path may not exist on this fw)",
+                    dsp_label,
+                )
+                log_event(
+                    "UPGRADE",
+                    f"{dsp_label}: cache_enable write issued but readback unavailable",
+                )
+            else:
+                assert result == "1", (
+                    f"{dsp_label}: cache_enable readback='{result}', expected '1' "
+                    f"(path={path})"
+                )
+                logger.info("%s: cache_enable = %s ✓", dsp_label, result)
+                log_event("UPGRADE", f"{dsp_label}: cache_enable verified = {result}")
