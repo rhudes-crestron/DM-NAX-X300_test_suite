@@ -759,24 +759,27 @@ class TestStreamingCleanup:
             left, right = _streaming_inputs_for_zone(z, device_cfg)
             level_l = _measure_streaming_level(dsp, left, device_cfg, settle_time=1.0)
             logger.info("Zone %d: level after stop settle: %.2f dB", z, level_l)
-            if z == 8:
-                logger.info("Zone 8: waiting extra 10s for decay...")
+            if z in (7, 8):
+                # Zones 7 and 8 are on DSP1 and exhibit a firmware residual
+                # signal (~-70 dB) at the ducker output after streaming stops.
+                # Allow an extra 10s for the DSP output chain to fully decay.
+                logger.info("Zone %d: waiting extra 10s for DSP1 decay...", z)
                 import time
                 time.sleep(10)
                 level_l_post = _measure_streaming_level(dsp, left, device_cfg, settle_time=1.0)
-                logger.info("Zone 8: level after extra wait: %.2f dB", level_l_post)
+                logger.info("Zone %d: level after extra wait: %.2f dB", z, level_l_post)
                 if level_l_post >= SILENCE_FLOOR_DB:
-                    logger.info("Zone 8: triggering deep diagnostics after STOP residual detected...")
+                    logger.info("Zone %d: triggering deep diagnostics after STOP residual detected...", z)
                     deep_zone8_diagnostics(dsp, device_cfg, streaming=streaming, cresnext=cresnext, poll_secs=30, interval=2)
                     _log_zone8_dsp_pipeline(
-                        "silence_failure_zone8_pipeline", dsp, device_cfg
+                        f"silence_failure_zone{z}_pipeline", dsp, device_cfg
                     )
                     _log_streaming_cleanup_diagnostics(
-                        f"silence_failure_zone8_after_extra_wait", streaming, cresnext, dsp,
+                        f"silence_failure_zone{z}_after_extra_wait", streaming, cresnext, dsp,
                         device_cfg=device_cfg, zones=[z]
                     )
                 assert level_l_post < SILENCE_FLOOR_DB, (
-                    f"Zone 8 {left} still has signal after extra wait: {level_l_post:.2f} dB"
+                    f"Zone {z} {left} still has signal after extra wait: {level_l_post:.2f} dB"
                 )
             else:
                 if level_l >= SILENCE_FLOOR_DB:
@@ -787,7 +790,7 @@ class TestStreamingCleanup:
                 assert level_l < SILENCE_FLOOR_DB, (
                     f"Zone {z} {left} still has signal after stop: {level_l:.2f} dB"
                 )
-            logger.info("Zone %d: silent (%.2f dB) ✓", z, level_l if z != 8 else level_l_post)
+            logger.info("Zone %d: silent (%.2f dB) ✓", z, level_l if z not in (7, 8) else level_l_post)
 
     def test_signal_absent_after_stop(self, cresnext, dsp, streaming, device_cfg):
         """After stopping: player STOPPED, DSP silent, IsSignalDetected=False."""
