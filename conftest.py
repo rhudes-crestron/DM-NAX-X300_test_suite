@@ -12,7 +12,7 @@ from datetime import datetime
 from lib.device_ssh import DeviceSSH
 from lib.dsp_controller import DSPController
 from lib.cresnext_client import CresNextClient
-from lib.test_trace import set_current_test, clear_current_test
+from lib.test_trace import set_current_test, clear_current_test, append_failure
 
 logger = logging.getLogger(__name__)
 
@@ -468,6 +468,19 @@ def pytest_runtest_setup(item):
 def pytest_runtest_teardown(item, nextitem):
     """Close per-test developer trace after test teardown."""
     clear_current_test(item.nodeid)
+
+
+def pytest_runtest_logreport(report):
+    """Write failure traceback and captured log into the per-test trace file."""
+    if report.failed:
+        longrepr = report.longreprtext if hasattr(report, "longreprtext") else str(report.longrepr)
+        captured_log = report.caplog if hasattr(report, "caplog") else ""
+        # sections contains ("Captured log call", text) and similar tuples
+        for title, content in getattr(report, "sections", []):
+            if "log" in title.lower():
+                captured_log = content
+                break
+        append_failure(report.nodeid, report.when, longrepr, captured_log)
 
 
 # ------------------------------------------------------------------

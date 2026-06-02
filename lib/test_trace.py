@@ -51,3 +51,22 @@ def log_event(source, message):
             return
         with open(_CURRENT_LOG, "a", encoding="utf-8") as f:
             f.write(line)
+
+
+def append_failure(nodeid, when, longrepr, captured_log):
+    """Append pytest failure traceback and captured log lines to the trace file.
+
+    Called from the pytest_runtest_logreport hook so failures that are only
+    visible in console.log also appear in the per-test .log file.
+    """
+    with _LOCK:
+        if not _CURRENT_LOG:
+            return
+        with open(_CURRENT_LOG, "a", encoding="utf-8") as f:
+            f.write(f"\n=== FAILURE ({when}) {nodeid} ===\n")
+            if longrepr:
+                f.write(str(longrepr).rstrip() + "\n")
+            if captured_log and captured_log.strip():
+                f.write("--- captured log ---\n")
+                f.write(captured_log.rstrip() + "\n")
+            f.write("=== END FAILURE ===\n")
