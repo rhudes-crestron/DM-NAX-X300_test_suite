@@ -96,6 +96,15 @@ class StreamingPlayerClient:
 
         local_url = self._curl_url(url)
 
+        if not self.ssh.can_open_bash():
+            # Eng debug timer may have expired mid-session — attempt to restore
+            # port 6022 before falling back to the SSH tunnel (which is blocked
+            # by AllowTcpForwarding=no on fw42/v0.6727 devices).
+            try:
+                self.ssh.restore_bash()
+            except Exception as e:
+                logger.warning("bash restore attempt failed: %s", e)
+
         if self.ssh.can_open_bash():
             return self.ssh.curl_bash(
                 url=local_url,

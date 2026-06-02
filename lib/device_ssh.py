@@ -32,6 +32,8 @@ class DeviceSSH:
         self.timeout = timeout
         self._client = None
         self._eng_debug_tmpdir = None
+        self._sudo_pass = "NHPchCdpeGFdRbtf"   # saved by open_debug_bash_port for restore_bash
+        self._eng_debug_params = None            # saved by enable_engineering_debug for restore_bash
 
     def connect(self):
         """Establish SSH connection to the device."""
@@ -551,6 +553,39 @@ class DeviceSSH:
         finally:
             sftp.close()
 
+    def restore_bash(self):
+        """Re-open port 6022 or re-enable engineering debug after timer expiry.
+
+        Called by streaming_client._ssh_request when can_open_bash() is False
+        mid-session.  Handles two cases:
+          1. Eng debug mode still active but port 6022 was closed — just
+             re-issue 'telnetport debug' (fast, ~5 s).
+          2. Eng debug mode fully expired — re-upload zip and run imgupd
+             engdbg (slow, ~60 s), then re-open port 6022.
+        Returns True if bash is now available, False otherwise.
+        """
+        if self.can_open_bash():
+            return True
+        if self.is_engineering_debug_enabled():
+            logger.info(
+                "%s: eng debug active but port 6022 closed — re-opening bash port", self.ip
+            )
+            return self.open_debug_bash_port(sudo_pass=self._sudo_pass)
+        if self._eng_debug_params is not None:
+            logger.info(
+                "%s: eng debug timer expired — re-enabling engineering debug", self.ip
+            )
+            try:
+                self.enable_engineering_debug(**self._eng_debug_params)
+                return self.can_open_bash()
+            except Exception as e:
+                logger.warning("restore_bash: re-enable failed on %s: %s", self.ip, e)
+                return False
+        logger.warning(
+            "restore_bash: no saved eng debug params for %s — cannot restore bash", self.ip
+        )
+        return False
+
     def enable_engineering_debug(
         self,
         zip_file=None,
@@ -563,6 +598,16 @@ class DeviceSSH:
         sudo_pass=None,
     ):
         """Enable engineering debug mode (VETest-style) and verify it."""
+        self._eng_debug_params = {
+            "zip_file": zip_file,
+            "search_roots": search_roots,
+            "set_current_datetime": set_current_datetime,
+            "remote_zip_path": remote_zip_path,
+            "smb_username": smb_username,
+            "smb_password": smb_password,
+            "smb_domain": smb_domain,
+            "sudo_pass": sudo_pass,
+        }
         if self.is_engineering_debug_enabled():
             logger.info("Engineering debug already enabled on %s", self.ip)
             return True
@@ -616,7 +661,8 @@ class DeviceSSH:
         Waits up to 10 s for the port to become reachable after issuing the
         command.  Logs a warning (does not raise) if it times out.
         """
-        cmd = f"sudo -SN:{sudo_user} -SP:{sudo_pass or 'NHPchCdpeGFdRbtf'} telnetport debug"
+        self._sudo_pass = sudo_pass or "NHPchCdpeGFdRbtf"
+        cmd = f"sudo -SN:{sudo_user} -SP:{self._sudo_pass} telnetport debug"
         try:
             self.execute(cmd, timeout=15)
             logger.info("Issued telnetport debug on %s — waiting for port %d", self.ip, debug_port)
