@@ -563,9 +563,8 @@ class DeviceSSH:
           2. Eng debug mode fully expired — re-upload zip and run imgupd
              engdbg (slow, ~60 s), then re-open port 6022.
         Returns True if bash is now available, False otherwise.
+        Callers must already have confirmed can_open_bash() is False.
         """
-        if self.can_open_bash():
-            return True
         if self.is_engineering_debug_enabled():
             logger.info(
                 "%s: eng debug active but port 6022 closed — re-opening bash port", self.ip
@@ -662,6 +661,17 @@ class DeviceSSH:
         command.  Logs a warning (does not raise) if it times out.
         """
         self._sudo_pass = sudo_pass or "NHPchCdpeGFdRbtf"
+
+        # If the port is already open, nothing to do.
+        import socket as _socket
+        try:
+            s = _socket.create_connection((self.ip, debug_port), timeout=2)
+            s.close()
+            logger.info("Debug bash port %d already open on %s — skipping telnetport debug", debug_port, self.ip)
+            return True
+        except OSError:
+            pass
+
         cmd = f"sudo -SN:{sudo_user} -SP:{self._sudo_pass} telnetport debug"
         try:
             self.execute(cmd, timeout=15)
@@ -671,7 +681,6 @@ class DeviceSSH:
             return False
 
         # Poll until port 6022 accepts connections (up to 10 s).
-        import socket as _socket
         deadline = time.time() + 10
         while time.time() < deadline:
             try:
