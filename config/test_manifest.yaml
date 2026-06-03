@@ -72,6 +72,7 @@ test_targets:
     firmware_file: ""               # auto-detect from firmware_dir
     skip_upgrade: false
     tests:
+      - *firmware
       - *audio_quality
       - *dsp_processing
       - *volume_controls
