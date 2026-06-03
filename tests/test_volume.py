@@ -123,9 +123,12 @@ class TestVolume:
             level = dsp.measure_output_level(out_name)
             levels.append(level)
 
-        # Each subsequent level should be equal or lower
+        # Each subsequent level should be equal or lower.
+        # Skip the comparison if either sample is -inf (DSP state intermittently
+        # omits rows for Zone 7 on 8ZSA; -inf means "measurement unavailable",
+        # not a true silence reading, so we cannot assert ordering against it).
         for i in range(1, len(levels)):
-            if not math.isinf(levels[i]):
+            if not math.isinf(levels[i]) and not math.isinf(levels[i - 1]):
                 assert levels[i] <= levels[i - 1] + test_settings["level_tolerance_db"], (
                     f"Zone {zone}: volume not monotonic at step {i}: "
                     f"{levels[i]:.2f} > {levels[i-1]:.2f}"
