@@ -83,9 +83,14 @@ LEVEL_LOWER_DB = -45.0
 SILENCE_FLOOR_DB = -100.0
 PLAY_SETTLE_S = 8.0        # Time for streaming to stabilise
 STOP_SETTLE_S = 20.0       # Time for output to drop after stop.
-                           # fw42 8ZSA DSP1 amp outputs decay at ~3 dB/s after route
-                           # clear; Zone 7/8 need ~27s total (settle + prior zone
-                           # measurements) to fall below SILENCE_FLOOR_DB (-100 dB).
+# On fw42 (8ZSA) the ALSA loopback buffer drains over a few seconds after
+# GStreamer stops.  Poll the amp outputs at this interval and wait up to the
+# timeout before clearing AV matrix routes so dspaudioctl's OUTPUT_GAIN reset
+# does not catch residual audio in the buffer (would create a ~-70 dB
+# peak-hold artifact that persists indefinitely in the DSP).
+_ALSA_DRAIN_THRESHOLD_DB = -60.0
+_ALSA_DRAIN_TIMEOUT_S = 15.0
+_ALSA_DRAIN_POLL_S = 0.5
 
 
 def _streaming_zones(device_cfg):
@@ -117,6 +122,45 @@ def _streaming_inputs_for_zone(zone_num, device_cfg=None):
     if device_cfg and device_cfg.get("dsp_fw_version", 21) >= 42:
         return f"A{zone_num}L", f"A{zone_num}R"
     return f"M{zone_num}L", f"M{zone_num}R"
+
+
+def _wait_alsa_drain(dsp, zones, device_cfg):
+    """Poll DSP amp outputs until all zones drain below _ALSA_DRAIN_THRESHOLD_DB.
+
+    On fw42 (8ZSA) the ALSA loopback buffer takes a few seconds to drain after
+    GStreamer transitions to NULL state.  Clearing the AV matrix route before
+    the buffer empties resets OUTPUT_GAIN to defaultVolume (-50 dB) while audio
+    is still present; the DSP peak-hold captures the resulting transient
+    (~-70 dB) and does not self-clear.  Waiting here ensures the buffer is
+    empty before the route-clear gain change occurs.
+
+    No-ops on fw21 (4ZSA): streaming is measured at pre-DSP mux inputs and
+    the route-clear gain race does not apply.
+    """
+    if device_cfg.get("dsp_fw_version", 21) < 42:
+        return
+    deadline = time.monotonic() + _ALSA_DRAIN_TIMEOUT_S
+    pending = list(zones)
+    while pending and time.monotonic() < deadline:
+        still_draining = []
+        for zone in pending:
+            left, _ = _streaming_inputs_for_zone(zone, device_cfg)
+            try:
+                level = dsp.measure_output_level(left, settle_time=0.0)
+            except Exception:
+                continue  # can't measure; don't block on it
+            if level < _ALSA_DRAIN_THRESHOLD_DB:  # also true for -inf
+                logger.info("Zone %d: ALSA drained (%.2f dB)", zone, level)
+            else:
+                still_draining.append(zone)
+        pending = still_draining
+        if pending:
+            time.sleep(_ALSA_DRAIN_POLL_S)
+    if pending:
+        logger.warning(
+            "ALSA drain timeout (%.1fs) for zones %s — continuing with route clear",
+            _ALSA_DRAIN_TIMEOUT_S, pending,
+        )
 
 
 def _measure_streaming_level(dsp, name, device_cfg, settle_time=1.0):
@@ -713,6 +757,12 @@ class TestStreamingCleanup:
             player = streaming.get_player(zone)
             player.stop_streaming()
             logger.info("Zone %d: stopped streaming", zone)
+
+        # Wait for ALSA loopback buffers to fully drain before clearing routes.
+        # On fw42 (8ZSA), clearing a zone route resets OUTPUT_GAIN to
+        # defaultVolume while the ALSA buffer still holds audio, causing the DSP
+        # peak-hold to latch a ~-70 dB residual.  See _wait_alsa_drain.
+        _wait_alsa_drain(dsp, all_zones, device_cfg)
 
         _log_streaming_cleanup_diagnostics(
             "after_player_stop_before_route_clear", streaming, cresnext, dsp, device_cfg, diag_zones
