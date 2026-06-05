@@ -151,8 +151,8 @@ def _wait_alsa_drain(dsp, zones, device_cfg):
                     f"cat /proc/asound/card1/pcm0p/sub{sub}/status 2>/dev/null || echo closed",
                     timeout=5,
                 ).strip()
-            except Exception as exc:
-                logger.warning("Zone %d ALSA sub%d status check failed: %s", zone, sub, exc)
+            except Exception as e:
+                logger.warning("Zone %d ALSA sub%d status check failed: %s", zone, sub, e)
                 still_open.append(zone)
                 continue
             first_line = out.split("\n")[0].strip().lower()
@@ -190,8 +190,8 @@ def _reset_dsp_peak_hold(cresnext, zones, device_cfg):
         try:
             cresnext.set_zone_audio(zone, Volume=0)
             logger.info("Zone %d: DSP peak-hold reset via Volume=0", zone)
-        except Exception as exc:
-            logger.warning("Zone %d: failed to reset DSP peak-hold: %s", zone, exc)
+        except Exception as e:
+            logger.warning("Zone %d: failed to reset DSP peak-hold: %s", zone, e)
     time.sleep(0.5)  # brief settle for DSP SPI transactions to complete
 
 
