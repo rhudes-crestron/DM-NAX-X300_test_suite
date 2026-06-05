@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DM-NAX Nightly Test — Onboarding a New Device</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3350;
+    --accent: #4e9af1;
+    --accent2: #5cb87a;
+    --warn: #e6a817;
+    --danger: #e05c5c;
+    --text: #d4d8f0;
+    --muted: #7a80a0;
+    --code-bg: #12141e;
+    --step-num: #4e9af1;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    padding: 40px 20px;
+  }
+  .page { max-width: 900px; margin: 0 auto; }
+
+  /* Header */
+  header {
+    border-left: 4px solid var(--accent);
+    padding: 8px 0 8px 20px;
+    margin-bottom: 40px;
+  }
+  header h1 { font-size: 1.8rem; color: #fff; margin-bottom: 4px; }
+  header .subtitle { color: var(--muted); font-size: 0.95rem; }
+  header .meta { margin-top: 10px; font-size: 0.82rem; color: var(--muted); }
+  header .meta span { margin-right: 20px; }
+
+  /* Section headers */
+  h2 {
+    font-size: 1.2rem;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+    margin: 48px 0 20px;
+  }
+  h3 { font-size: 1rem; color: #fff; margin: 24px 0 10px; }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+  }
+
+  /* Steps */
+  .step {
+    display: flex;
+    gap: 18px;
+    margin-bottom: 28px;
+    align-items: flex-start;
+  }
+  .step-num {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 2px;
+  }
+  .step-body { flex: 1; }
+  .step-body h3 { margin-top: 0; }
+
+  /* Code blocks */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-size: 0.83rem;
+    line-height: 1.6;
+    margin: 10px 0;
+  }
+  code { font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace; }
+  pre code { color: #c9d1f0; }
+  .cm  { color: #5c6a8a; }  /* comment */
+  .kw  { color: #c792ea; }  /* keyword */
+  .st  { color: #c3e88d; }  /* string */
+  .nm  { color: #82aaff; }  /* name / flag */
+  .op  { color: #89ddff; }  /* operator / punct */
+  .hl  { background: #1e2a45; display: block; border-left: 3px solid var(--accent); padding-left: 10px; margin-left: -16px; padding-right: 4px; }
+
+  /* Inline code */
+  p code, li code, td code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 0.85em;
+    color: #82aaff;
+  }
+
+  /* Callout boxes */
+  .callout {
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 12px 0;
+    font-size: 0.9rem;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .callout-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+  .callout.info  { background: #1a2a40; border: 1px solid #2a4a70; }
+  .callout.warn  { background: #2a2010; border: 1px solid #5a4010; }
+  .callout.ok    { background: #172410; border: 1px solid #305020; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin: 12px 0; }
+  th { background: var(--surface2); color: var(--accent); text-align: left; padding: 10px 14px; border: 1px solid var(--border); font-weight: 600; }
+  td { padding: 9px 14px; border: 1px solid var(--border); vertical-align: top; }
+  tr:nth-child(even) td { background: var(--surface2); }
+  td.good { color: var(--accent2); }
+  td.na   { color: var(--muted); }
+
+  /* Timeline */
+  .timeline { position: relative; padding-left: 28px; margin: 16px 0; }
+  .timeline::before {
+    content: "";
+    position: absolute;
+    left: 8px; top: 0; bottom: 0;
+    width: 2px;
+    background: var(--border);
+  }
+  .tl-item { position: relative; margin-bottom: 14px; }
+  .tl-item::before {
+    content: "";
+    position: absolute;
+    left: -24px; top: 6px;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+  }
+  .tl-item.merge::before { background: var(--accent2); }
+  .tl-item.deploy::before { background: var(--warn); }
+  .tl-item.cleanup::before { background: var(--danger); }
+  .tl-label { font-weight: 600; color: #fff; font-size: 0.9rem; }
+  .tl-desc { color: var(--muted); font-size: 0.83rem; }
+
+  /* Badge */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  .badge.safe    { background: #1d3a1d; color: var(--accent2); }
+  .badge.caution { background: #3a2a10; color: var(--warn); }
+  .badge.risk    { background: #3a1010; color: var(--danger); }
+
+  p { margin-bottom: 10px; }
+  ul, ol { padding-left: 22px; margin-bottom: 10px; }
+  li { margin-bottom: 4px; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+
+  footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <h1>DM-NAX Nightly Test — Onboarding a New Device</h1>
+  <div class="subtitle">How to develop in isolation and merge into the shared nightly run</div>
+  <div class="meta">
+    <span>Repo: <code>CrestronEngineering/DM-NAX_test_suite</code></span>
+    <span>Build server: <code>Nj6v-docker-04</code></span>
+    <span>Last updated: 2026-06-05</span>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<h2>Overview</h2>
+
+<p>
+  The nightly test suite is driven by a <strong>systemd timer</strong> on <code>Nj6v-docker-04</code>
+  that fires at <code>05:00 UTC</code> and runs <code>orchestrator.py --schedule nightly</code>.
+  The orchestrator reads <code>config/test_manifest.yaml</code> to decide which devices to test
+  and <code>config/devices.yaml</code> for each device's connection details.
+</p>
+
+<div class="card">
+  <table>
+    <thead><tr><th>Component</th><th>Location</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>orchestrator.py</code></td><td><code>/opt/dmnax-test-suite/</code></td><td>Launches parallel pytest sessions, one per device</td></tr>
+      <tr><td><code>config/test_manifest.yaml</code></td><td><code>/opt/dmnax-test-suite/config/</code></td><td>Which tests run on which devices; schedule targets</td></tr>
+      <tr><td><code>config/devices.yaml</code></td><td><code>/opt/dmnax-test-suite/config/</code></td><td>IP, credentials, zones, DSP version per device</td></tr>
+      <tr><td><code>dmnax-nightly.timer</code></td><td><code>/etc/systemd/system/</code></td><td>Systemd timer — fires at 05:00 UTC daily</td></tr>
+      <tr><td><code>dmnax-nightly.service</code></td><td><code>/etc/systemd/system/</code></td><td>Systemd service — runs orchestrator.py</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<h2>Part 1 — Developing a New Device in Isolation</h2>
+
+<p>
+  The new team member works entirely on a <strong>feature branch</strong> with a <strong>separate
+  working directory</strong> on the build server. The existing 8ZSA nightly is never touched.
+</p>
+
+<div class="step">
+  <div class="step-num">1</div>
+  <div class="step-body">
+    <h3>Create a feature branch</h3>
+    <p>Branch off the current <code>master</code> so the new work starts from a clean stable base.</p>
+<pre><code><span class="cm"># On the new team member's machine</span>
+git clone git@nj-github.crestron.crestron.com:CrestronEngineering/DM-NAX_test_suite.git
+cd DM-NAX_test_suite
+git checkout -b feature/new-device-nightly</code></pre>
+    <div class="callout info">
+      <span class="callout-icon">ℹ</span>
+      <div>All changes (new <code>devices.yaml</code> entry, new fixtures, new test files) go on this branch.
+      <code>master</code> is never pushed to directly.</div>
+    </div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">2</div>
+  <div class="step-body">
+    <h3>Create a separate checkout on the build server <span class="badge caution">build server</span></h3>
+    <p>Clone a second copy of the repo into a different directory, tracking the feature branch.</p>
+<pre><code>ssh Nj6v-docker-04
+sudo git clone git@nj-github.crestron.crestron.com:CrestronEngineering/DM-NAX_test_suite.git \
+    /opt/dmnax-test-suite-newdevice
+cd /opt/dmnax-test-suite-newdevice
+sudo git checkout feature/new-device-nightly
+sudo chown -R dmnax-test:dmnax-test /opt/dmnax-test-suite-newdevice
+sudo -u dmnax-test /opt/dmnax-test-suite-newdevice/venv/bin/pip install -r requirements.txt</code></pre>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">3</div>
+  <div class="step-body">
+    <h3>Create a dedicated systemd timer and service <span class="badge caution">build server</span></h3>
+    <p>
+      Two new unit files that mirror the existing <code>dmnax-nightly</code> pair but point at the
+      new checkout and a different log file. Schedule offset by 1 hour so the two runs do not
+      collide on shared hardware.
+    </p>
+
+    <h3><code>/etc/systemd/system/dmnax-newdevice-nightly.timer</code></h3>
+<pre><code>[Unit]
+Description=DM-NAX New Device Nightly Test Timer
+
+[Timer]
+<span class="hl">OnCalendar=*-*-* 06:00:00    <span class="cm"># 1 hour after the 8ZSA run at 05:00</span></span>
+Persistent=true
+
+[Install]
+WantedBy=timers.target</code></pre>
+
+    <h3><code>/etc/systemd/system/dmnax-newdevice-nightly.service</code></h3>
+<pre><code>[Unit]
+Description=DM-NAX New Device Nightly Test Run
+Wants=dmnax-newdevice-nightly.timer
+
+[Service]
+Type=oneshot
+User=dmnax-test
+Group=dmnax-test
+<span class="hl">WorkingDirectory=/opt/dmnax-test-suite-newdevice</span>
+<span class="hl">ExecStart=/opt/dmnax-test-suite-newdevice/venv/bin/python3 orchestrator.py --schedule nightly</span>
+<span class="hl">StandardOutput=append:/var/log/dmnax-test/newdevice-nightly.log</span>
+<span class="hl">StandardError=append:/var/log/dmnax-test/newdevice-nightly.log</span>
+TimeoutStartSec=50400
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+
+    <h3>Enable the timer</h3>
+<pre><code>sudo systemctl daemon-reload
+sudo systemctl enable --now dmnax-newdevice-nightly.timer
+<span class="cm"># Verify both timers are listed</span>
+sudo systemctl list-timers | grep dmnax</code></pre>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">4</div>
+  <div class="step-body">
+    <h3>Day-to-day development loop</h3>
+    <p>The team member pushes changes to the feature branch; the build server pulls them before each run.</p>
+<pre><code><span class="cm"># On their machine — push changes</span>
+git push origin feature/new-device-nightly
+
+<span class="cm"># On build server — pick up latest (or this happens automatically at 06:00)</span>
+ssh Nj6v-docker-04 "cd /opt/dmnax-test-suite-newdevice && git pull"</code></pre>
+    <div class="callout ok">
+      <span class="callout-icon">✔</span>
+      <div>The 8ZSA nightly at <code>/opt/dmnax-test-suite</code> runs from <code>master</code> and is
+      completely unaffected at every point during this development phase.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Isolation table -->
+<div class="card">
+  <table>
+    <thead><tr><th></th><th>Existing (8ZSA)</th><th>New device (branch)</th></tr></thead>
+    <tbody>
+      <tr><td>Checkout</td><td><code>/opt/dmnax-test-suite</code></td><td><code>/opt/dmnax-test-suite-newdevice</code></td></tr>
+      <tr><td>Git branch</td><td><code>master</code></td><td><code>feature/new-device-nightly</code></td></tr>
+      <tr><td>Timer fires</td><td><code>05:00 UTC</code></td><td><code>06:00 UTC</code></td></tr>
+      <tr><td>Systemd unit</td><td><code>dmnax-nightly</code></td><td><code>dmnax-newdevice-nightly</code></td></tr>
+      <tr><td>Log file</td><td><code>nightly.log</code></td><td><code>newdevice-nightly.log</code></td></tr>
+      <tr><td>Results dir</td><td><code>…test-suite/results/</code></td><td><code>…test-suite-newdevice/results/</code></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<h2>Part 2 — Merging into the Shared Nightly Run</h2>
+
+<p>Once the new device nightly has been passing consistently for several runs, follow these steps to
+make it a permanent part of the shared nightly alongside the 8ZSA, 4ZSA, and 4ZSP.</p>
+
+<div class="step">
+  <div class="step-num">1</div>
+  <div class="step-body">
+    <h3>Open and merge a Pull Request</h3>
+    <p>The team member creates a PR from <code>feature/new-device-nightly</code> → <code>master</code>
+    on <code>nj-github.crestron.crestron.com</code>. You review and merge it.</p>
+<pre><code><span class="cm"># Via GitHub UI, or on the command line after approval:</span>
+git checkout master
+git merge --no-ff feature/new-device-nightly
+git push origin master</code></pre>
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div>Do not push directly to <code>master</code> without a review — the merge brings in the new
+      <code>devices.yaml</code> entry and any new test files that will run against real hardware.</div>
+    </div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">2</div>
+  <div class="step-body">
+    <h3>Add the new device to <code>test_manifest.yaml</code></h3>
+    <p>Two edits in the same file — a <code>test_targets</code> entry and a schedule update.</p>
+
+    <h3>2a — Add a <code>test_targets</code> entry</h3>
+    <p>A commented template is already in the file. Fill it in:</p>
+<pre><code>test_targets:
+
+  <span class="cm"># … existing entries unchanged …</span>
+
+<span class="hl">  DM-NAX-NEWMODEL:</span>
+<span class="hl">    enabled: true</span>
+<span class="hl">    device: "DM-NAX-NEWMODEL"     <span class="cm"># must match the key in devices.yaml</span></span>
+<span class="hl">    firmware_file: ""              <span class="cm"># auto-detect from firmware_dir</span></span>
+<span class="hl">    timeout_minutes: 720</span>
+<span class="hl">    tests:</span>
+<span class="hl">      - *firmware</span>
+<span class="hl">      - *audio_quality</span>
+<span class="hl">      - *dsp_processing</span>
+<span class="hl">      - *volume_controls</span>
+<span class="hl">      - *signal_routing</span>
+<span class="hl">      - *amplifier</span>
+<span class="hl">      - *streaming</span>
+<span class="hl">    skip_tests: []</span>
+<span class="hl">    extra_pytest_args: "--zone-mode=quick"</span></code></pre>
+
+    <h3>2b — Add to both schedule target lists</h3>
+<pre><code>schedule:
+  nightly:
+    cron: "0 1 * * *"
+<span class="hl">    targets: ["DM-NAX-4ZSA", "DM-NAX-4ZSP", "DM-NAX-8ZSA", "DM-NAX-NEWMODEL"]</span>
+  weekly_full:
+    cron: "0 3 * * 0"
+<span class="hl">    targets: ["DM-NAX-4ZSA", "DM-NAX-4ZSP", "DM-NAX-8ZSA", "DM-NAX-NEWMODEL"]</span></code></pre>
+
+    <p>Commit and push this change to <code>master</code>:</p>
+<pre><code>git add config/test_manifest.yaml
+git commit -m "manifest: add DM-NAX-NEWMODEL to nightly and weekly_full schedules"
+git push origin master</code></pre>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">3</div>
+  <div class="step-body">
+    <h3>Deploy to build server <span class="badge caution">build server</span></h3>
+<pre><code>ssh Nj6v-docker-04 "cd /opt/dmnax-test-suite && git pull && git log --oneline -3"</code></pre>
+    <p>Confirm the latest commit shows in the output before proceeding.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">4</div>
+  <div class="step-body">
+    <h3>Run one manual on-demand test to verify <span class="badge caution">build server</span></h3>
+    <p>Do not wait for the overnight timer — validate the new device runs cleanly right now.</p>
+<pre><code>ssh Nj6v-docker-04
+sudo -u dmnax-test /opt/dmnax-test-suite/venv/bin/python3 \
+    /opt/dmnax-test-suite/orchestrator.py \
+    --schedule on_demand --target DM-NAX-NEWMODEL</code></pre>
+    <div class="callout ok">
+      <span class="callout-icon">✔</span>
+      <div>If this passes, the next nightly at <code>05:00 UTC</code> automatically runs all four devices
+      in parallel. No further changes are needed.</div>
+    </div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">5</div>
+  <div class="step-body">
+    <h3>Clean up the temporary branch setup <span class="badge risk">destructive — do last</span></h3>
+    <p>Once the new device is confirmed stable in the shared nightly, remove the temporary
+    infrastructure from Part 1.</p>
+<pre><code>ssh Nj6v-docker-04
+<span class="cm"># Stop and remove the temporary timer/service</span>
+sudo systemctl disable --now dmnax-newdevice-nightly.timer
+sudo rm /etc/systemd/system/dmnax-newdevice-nightly.timer
+sudo rm /etc/systemd/system/dmnax-newdevice-nightly.service
+sudo systemctl daemon-reload
+
+<span class="cm"># Remove the temporary checkout</span>
+sudo rm -rf /opt/dmnax-test-suite-newdevice</code></pre>
+
+    <p>On the git remote, delete the feature branch once merged:</p>
+<pre><code>git push origin --delete feature/new-device-nightly</code></pre>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<h2>End-to-End Timeline</h2>
+
+<div class="timeline">
+  <div class="tl-item">
+    <div class="tl-label">Branch created</div>
+    <div class="tl-desc">New team member branches off master → <code>feature/new-device-nightly</code></div>
+  </div>
+  <div class="tl-item">
+    <div class="tl-label">Separate build server setup</div>
+    <div class="tl-desc">Second checkout at <code>/opt/dmnax-test-suite-newdevice</code>, own timer at 06:00 UTC</div>
+  </div>
+  <div class="tl-item">
+    <div class="tl-label">Development &amp; iteration</div>
+    <div class="tl-desc">Push → pull → nightly runs in isolation. 8ZSA unaffected throughout.</div>
+  </div>
+  <div class="tl-item merge">
+    <div class="tl-label">PR review + merge to master</div>
+    <div class="tl-desc">Code review gate before anything lands in the shared run</div>
+  </div>
+  <div class="tl-item merge">
+    <div class="tl-label">test_manifest.yaml updated</div>
+    <div class="tl-desc">New device added to <code>test_targets</code> and both schedule lists</div>
+  </div>
+  <div class="tl-item deploy">
+    <div class="tl-label">git pull on build server + manual on-demand run</div>
+    <div class="tl-desc">Validate before relying on the overnight timer</div>
+  </div>
+  <div class="tl-item deploy">
+    <div class="tl-label">Next 05:00 UTC timer</div>
+    <div class="tl-desc">All devices (4ZSA, 4ZSP, 8ZSA, NEWMODEL) run in parallel automatically</div>
+  </div>
+  <div class="tl-item cleanup">
+    <div class="tl-label">Cleanup</div>
+    <div class="tl-desc">Remove temporary timer, service, and <code>/opt/dmnax-test-suite-newdevice</code></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<h2>Quick Reference — Key Files</h2>
+
+<div class="card">
+  <table>
+    <thead><tr><th>File</th><th>When to edit</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>config/devices.yaml</code></td>
+        <td>Add the new device's IP, credentials, zones, <code>dsp_fw_version</code>. Done on the feature branch.</td>
+      </tr>
+      <tr>
+        <td><code>config/test_manifest.yaml</code></td>
+        <td>Add <code>test_targets</code> entry + schedule targets. Done after merge to master.</td>
+      </tr>
+      <tr>
+        <td><code>/etc/systemd/system/dmnax-newdevice-nightly.{timer,service}</code></td>
+        <td>Created for the isolation phase; deleted after the new device is in master's nightly.</td>
+      </tr>
+      <tr>
+        <td><code>/opt/dmnax-test-suite-newdevice/</code></td>
+        <td>Temporary second checkout; deleted after merge and cleanup.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<footer>
+  DM-NAX test infrastructure · <code>Nj6v-docker-04</code> ·
+  Repo: <code>CrestronEngineering/DM-NAX_test_suite</code> ·
+  Generated 2026-06-05
+</footer>
+
+</div>
+</body>
+</html>
