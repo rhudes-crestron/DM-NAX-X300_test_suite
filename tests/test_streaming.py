@@ -83,13 +83,12 @@ LEVEL_LOWER_DB = -45.0
 SILENCE_FLOOR_DB = -100.0
 PLAY_SETTLE_S = 8.0        # Time for streaming to stabilise
 STOP_SETTLE_S = 20.0       # Time for output to drop after stop.
-# On fw42 (8ZSA) the ALSA loopback buffer drains over a few seconds after
-# GStreamer stops.  Poll the amp outputs at this interval and wait up to the
-# timeout before clearing AV matrix routes so dspaudioctl's OUTPUT_GAIN reset
-# does not catch residual audio in the buffer (would create a ~-70 dB
-# peak-hold artifact that persists indefinitely in the DSP).
-_ALSA_DRAIN_THRESHOLD_DB = -60.0
-_ALSA_DRAIN_TIMEOUT_S = 15.0
+# On fw42 (8ZSA) the firmware's PUT /player/stop may close the ALSA PCM without
+# flushing the loopback ring buffer.  Poll /proc/asound/card1/pcm0p/subN/status
+# via the bash port; once the playback side is closed the loopback generates
+# silence, so clearing the route then results in -inf rather than the -70 dB
+# peak-hold artifact.  Zone N maps to subdevice N-1 (0-indexed).
+_ALSA_DRAIN_TIMEOUT_S = 30.0
 _ALSA_DRAIN_POLL_S = 0.5
 
 
@@ -125,14 +124,16 @@ def _streaming_inputs_for_zone(zone_num, device_cfg=None):
 
 
 def _wait_alsa_drain(dsp, zones, device_cfg):
-    """Poll DSP amp outputs until all zones drain below _ALSA_DRAIN_THRESHOLD_DB.
+    """Wait until ALSA PCM playback subdevices for all zones report 'closed'.
 
-    On fw42 (8ZSA) the ALSA loopback buffer takes a few seconds to drain after
-    GStreamer transitions to NULL state.  Clearing the AV matrix route before
-    the buffer empties resets OUTPUT_GAIN to defaultVolume (-50 dB) while audio
-    is still present; the DSP peak-hold captures the resulting transient
-    (~-70 dB) and does not self-clear.  Waiting here ensures the buffer is
-    empty before the route-clear gain change occurs.
+    On fw42 (8ZSA), firmware v0.6730+ may close the ALSA PCM without flushing
+    the loopback ring buffer, leaving stale audio that causes dspaudioctl's
+    OUTPUT_GAIN reset (triggered by clear_zone_route) to latch a ~-70 dB
+    residual in the DSP peak-hold register.  Polling the kernel PCM status
+    file detects when GStreamer has released the device; the loopback driver
+    then generates silence so the subsequent route-clear captures -inf.
+
+    Zone N maps to ALSA playback subdevice sub(N-1): Zone 7 → sub6, Zone 8 → sub7.
 
     No-ops on fw21 (4ZSA): streaming is measured at pre-DSP mux inputs and
     the route-clear gain race does not apply.
@@ -142,18 +143,23 @@ def _wait_alsa_drain(dsp, zones, device_cfg):
     deadline = time.monotonic() + _ALSA_DRAIN_TIMEOUT_S
     pending = list(zones)
     while pending and time.monotonic() < deadline:
-        still_draining = []
+        still_open = []
         for zone in pending:
-            left, _ = _streaming_inputs_for_zone(zone, device_cfg)
+            sub = zone - 1  # ALSA subdevice is 0-indexed
             try:
-                level = dsp.measure_output_level(left, settle_time=0.0)
-            except Exception:
-                continue  # can't measure; don't block on it
-            if level < _ALSA_DRAIN_THRESHOLD_DB:  # also true for -inf
-                logger.info("Zone %d: ALSA drained (%.2f dB)", zone, level)
-            else:
-                still_draining.append(zone)
-        pending = still_draining
+                out = dsp.ssh.execute_bash(
+                    f"cat /proc/asound/card1/pcm0p/sub{sub}/status 2>/dev/null || echo closed",
+                    timeout=5,
+                ).strip()
+            except Exception as exc:
+                logger.warning("Zone %d ALSA sub%d status check failed: %s", zone, sub, exc)
+                still_open.append(zone)
+                continue
+            first_line = out.split("\n")[0].strip().lower()
+            logger.info("Zone %d: ALSA sub%d status=%r", zone, sub, first_line)
+            if first_line != "closed":
+                still_open.append(zone)
+        pending = still_open
         if pending:
             time.sleep(_ALSA_DRAIN_POLL_S)
     if pending:
@@ -161,6 +167,32 @@ def _wait_alsa_drain(dsp, zones, device_cfg):
             "ALSA drain timeout (%.1fs) for zones %s — continuing with route clear",
             _ALSA_DRAIN_TIMEOUT_S, pending,
         )
+
+
+def _reset_dsp_peak_hold(cresnext, zones, device_cfg):
+    """Reset DSP amp-output peak-hold registers after zone routes are cleared.
+
+    On fw42 (8ZSA), clearing a zone route resets OUTPUT_GAIN to defaultVolume
+    while the ALSA loopback ring buffer may still hold stale audio.  The DSP
+    captures one sample at the new gain (stale_audio × -50 dB ≈ -70 dB) and
+    the peak-hold latches indefinitely.
+
+    After the route is cleared the DSP input is disconnected (MIX=0).  Sending
+    a Volume=0 triggers dspaudioctl to re-issue an OUTPUT_GAIN SPI command;
+    the DSP then evaluates 0 (no input) × new gain = -inf, resetting the
+    peak-hold to -341 dB and allowing test_silence_after_stop to pass.
+
+    No-ops on fw21 (4ZSA).
+    """
+    if device_cfg.get("dsp_fw_version", 21) < 42:
+        return
+    for zone in zones:
+        try:
+            cresnext.set_zone_audio(zone, Volume=0)
+            logger.info("Zone %d: DSP peak-hold reset via Volume=0", zone)
+        except Exception as exc:
+            logger.warning("Zone %d: failed to reset DSP peak-hold: %s", zone, exc)
+    time.sleep(0.5)  # brief settle for DSP SPI transactions to complete
 
 
 def _measure_streaming_level(dsp, name, device_cfg, settle_time=1.0):
@@ -779,6 +811,12 @@ class TestStreamingCleanup:
                 logger.info("Zone %d: CresNext route cleared", zone)
             except Exception as e:
                 logger.warning("Zone %d: failed to clear CresNext route: %s", zone, e)
+
+        # Reset DSP peak-hold for fw42: after route clear the input is
+        # disconnected (MIX=0); a Volume=0 forces dspaudioctl to re-issue
+        # OUTPUT_GAIN so the DSP evaluates 0 × gain = -inf instead of
+        # retaining the ~-70 dB transient latched during the route clear.
+        _reset_dsp_peak_hold(cresnext, all_zones, device_cfg)
 
         _log_streaming_cleanup_diagnostics(
             "after_route_clear_before_mixer_scrub", streaming, cresnext, dsp, device_cfg, diag_zones
