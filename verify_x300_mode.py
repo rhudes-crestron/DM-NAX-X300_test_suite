@@ -82,15 +82,19 @@ def main():
         print("=" * 70)
         
         other_mode = 'commercial' if mode == 'residential' else 'residential'
-        mode_val = 1 if other_mode == 'commercial' else 0
         
         print(f"\nTo switch to {other_mode.upper()} mode:")
-        print(f"  1. Via SSH/script:")
-        print(f"     dsp_test mode {mode_val}")
-        print(f"  2. Or via console (if available):")
+        print(f"\n  RECOMMENDED METHOD (from device console):")
+        print(f"  1. Connect to device console (serial or web interface)")
+        print(f"  2. At DM-NAX-AMP-X300> prompt, run:")
         print(f"     aconfigcontrol set{'comme' if other_mode == 'commercial' else 'resid'}boot")
         print(f"  3. Reboot device for change to take effect")
         print(f"  4. Verify with: dsp_test mode")
+        print(f"\n  Why use aconfigcontrol?")
+        print(f"    - Synchronizes ALL components (DSP, AMP control, etc.)")
+        print(f"    - Ensures system-wide consistency")
+        print(f"    - Prevents component mismatches")
+        print(f"\n  Note: aconfigcontrol is console-only and NOT available via SSH")
         
         print("\n" + "=" * 70)
         print("✓ Mode verification complete")

@@ -130,7 +130,7 @@ According to firmware code (`zoneRoutes.cpp`):
 
 ## Switching Modes
 
-### Via SSH Command Line
+### Reading Current Mode (Via SSH)
 
 ```bash
 # Connect to X300 via SSH (port 6022)
@@ -139,15 +139,32 @@ ssh -p 6022 admin@192.168.1.246
 # Check current mode
 dsp_test mode
 # Output: "DSP mode is  Residential" or "DSP mode is  Commercial"
+```
+
+### Changing Modes (Console Only)
+
+**IMPORTANT:** Mode changes MUST be done from device console using `aconfigcontrol`.
+This ensures ALL components (DSP, AMP control, etc.) are synchronized.
+
+```bash
+# Connect to device console (serial or web interface)
+# At DM-NAX-AMP-X300> prompt:
 
 # Set to residential mode
-dsp_test mode 0
-# Output: "Set DSP mode to Residential"
+aconfigcontrol setresidboot
 
 # Set to commercial mode
-dsp_test mode 1
-# Output: "Set DSP mode to Commercial"
+aconfigcontrol setcommeboot
+
+# Reboot device for changes to take effect
+reboot
+
+# After reboot, verify via SSH:
+dsp_test mode
 ```
+
+**WARNING:** Do NOT use `dsp_test mode 0/1` to change modes. This only changes
+the DSP component and will cause mismatches with other system components!
 
 ### Via Python Test Suite
 

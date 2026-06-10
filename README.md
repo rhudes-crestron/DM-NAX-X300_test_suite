@@ -47,14 +47,18 @@ The DM-NAX-X300 supports two operating modes that affect zone configuration:
 
 **DSP Mode Commands:**
 ```bash
-# Read current mode
+# Read current mode (via SSH)
 dsp_test mode
 
-# Set to residential mode (0)
-dsp_test mode 0
+# IMPORTANT: To CHANGE modes, use aconfigcontrol from device console:
+# (Cannot be done via SSH - console access only)
+# At DM-NAX-AMP-X300> prompt:
+aconfigcontrol setresidboot   # Set Residential mode
+aconfigcontrol setcommeboot   # Set Commercial mode
+# Then reboot device
 
-# Set to commercial mode (1)
-dsp_test mode 1
+# Why aconfigcontrol? It synchronizes ALL components (DSP, AMP control, etc.)
+# Using dsp_test mode 0/1 only changes DSP and should NOT be used!
 ```
 
 **Python API:**

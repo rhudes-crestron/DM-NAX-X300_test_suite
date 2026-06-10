@@ -257,35 +257,51 @@ DSP mode is  Commercial
 ---
 
 ### test_set_mode
-**Purpose:** Verify DSP mode can be switched between residential and commercial.
+**Purpose:** Verify DSP mode detection and reading.
+
+**IMPORTANT NOTE:** This test only READS the current mode. Changing modes must be
+done from device console using `aconfigcontrol` command to ensure all components
+(DSP, AMP control, etc.) are synchronized.
 
 **Test runs twice:** Once for residential, once for commercial (pytest.parametrize)
 
-#### Setting Residential Mode:
+#### Reading Residential Mode:
 
 **Steps:**
-1. Read initial mode: `dsp_test mode`
-2. Set to residential: `dsp_test mode 0`
-3. Verify mode changed: `dsp_test mode` → "Residential"
-4. Restore initial mode
+1. Connect to device via SSH
+2. Read current mode: `dsp_test mode`
+3. Verify output: "DSP mode is  Residential"
+4. Verify zone count is 2
 
 **Expected Results:**
 ```
-Set DSP mode to Residential
+DSP mode is  Residential
+2 stereo zones
 ```
 
-#### Setting Commercial Mode:
+#### Reading Commercial Mode:
 
 **Steps:**
-1. Read initial mode: `dsp_test mode`
-2. Set to commercial: `dsp_test mode 1`
-3. Verify mode changed: `dsp_test mode` → "Commercial"
-4. Restore initial mode
+1. Connect to device via SSH
+2. Read current mode: `dsp_test mode`
+3. Verify output: "DSP mode is  Commercial"
+4. Verify zone/channel count is 4
 
 **Expected Results:**
 ```
-Set DSP mode to Commercial
+DSP mode is  Commercial
+4 mono channels
 ```
+
+#### To Change Modes (Manual Process):
+
+**Must be done from device console (not via SSH):**
+1. Connect to device console (serial or web interface)
+2. At DM-NAX-AMP-X300> prompt:
+   - For Residential: `aconfigcontrol setresidboot`
+   - For Commercial: `aconfigcontrol setcommeboot`
+3. Reboot device: `reboot`
+4. Verify via SSH: `dsp_test mode`
 
 **Pass Criteria:**
 - Mode switches successfully
