@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-X300 Mode Verification - Using both AConfigControl and ampctrl
+X300 Mode Verification
 
-This script demonstrates how to verify the residential/commercial mode
-using two different commands:
-  1. AConfigControl - Shows saved and running mode (from config)
-  2. ampctrl - Shows actual running mode (from registers read at boot)
+Verifies the residential/commercial mode on X300 devices using dsp_test command.
+
+X300 uses different commands than 8ZSA/FPGA devices:
+  - Uses: dsp_test mode (works via SSH)
+  - Does NOT have: ampctrl command
 
 Usage:
     export X300_IP=192.168.1.246 X300_USERNAME=admin X300_PASSWORD=admin123
@@ -43,81 +44,53 @@ def main():
         controller.connect()
         print("✓ Connected successfully\n")
         
-        # Method 1: AConfigControl (shows saved and running modes)
+        # Get mode using dsp_test (works via SSH on X300)
         print("=" * 70)
-        print("Method 1: AConfigControl (Config-based)")
+        print("Mode Verification (using dsp_test)")
         print("=" * 70)
-        print("Command: AConfigControl")
-        print("\nThis shows:")
-        print("  - Saved mode (what will be used after next reboot)")
-        print("  - Running mode (what DSP is currently using)")
+        print("Command: dsp_test mode")
+        print("\nThis reads the DSP operating mode:")
+        print("  - Residential: 2 stereo zones")
+        print("  - Commercial: 4 mono channels")
         
-        mode_details = controller.get_mode_detailed()
-        print(f"\nAoIP Mode:")
-        print(f"  Saved:   {mode_details.get('aoip_saved', 'Unknown')}")
-        print(f"  Running: {mode_details.get('aoip_running', 'Unknown')}")
-        print(f"\nAudio Mode:")
-        print(f"  Saved:   {mode_details.get('audio_saved', 'Unknown').title()}")
-        print(f"  Running: {mode_details.get('audio_running', 'Unknown').title()}")
+        mode = controller.get_mode()
+        zones = controller.get_zone_count()
         
-        # Method 2: ampctrl (shows actual running mode)
+        print(f"\nCurrent Mode: {mode.upper()}")
+        print(f"Zone Count: {zones}")
+        
+        # Show configuration details
         print("\n" + "=" * 70)
-        print("Method 2: ampctrl (Register-based)")
-        print("=" * 70)
-        print("Command: ampctrl")
-        print("\nThis shows:")
-        print("  - Actual mode that AMP control application is using")
-        print("  - Read from hardware registers at boot time")
-        print("  - Also shows power mode (Always On vs Power Saver)")
-        
-        ampctrl_mode = controller.get_ampctrl_mode_from_status()
-        print(f"\nAudio Mode: {ampctrl_mode.get('audio_mode', 'Unknown').title()}")
-        print(f"Power Mode: {ampctrl_mode.get('power_mode', 'Unknown').replace('_', ' ').title()}")
-        
-        # Verify consistency
-        print("\n" + "=" * 70)
-        print("Mode Consistency Check")
+        print("Current Configuration")
         print("=" * 70)
         
-        consistency = controller.verify_mode_consistency()
-        
-        print(f"\nAConfigControl Saved:    {consistency['aconfig_saved'].title()}")
-        print(f"AConfigControl Running:  {consistency['aconfig_running'].title()}")
-        print(f"ampctrl Running:         {consistency['ampctrl_running'].title()}")
-        print(f"\nAll modes consistent: {'✓ YES' if consistency['consistent'] else '✗ NO'}")
-        print(f"Reboot needed:        {'✓ YES' if consistency['needs_reboot'] else '✗ NO'}")
-        
-        if not consistency['consistent']:
-            print("\n⚠ WARNING: Modes are inconsistent!")
-            if consistency['needs_reboot']:
-                print("  → Saved mode differs from running mode")
-                print(f"  → Device will switch to {consistency['aconfig_saved'].upper()} after reboot")
-            else:
-                print("  → This may indicate a configuration issue")
-        else:
-            print(f"\n✓ Device is properly configured in {consistency['aconfig_running'].upper()} mode")
-        
-        # Show what each mode means
-        print("\n" + "=" * 70)
-        print("Mode Descriptions")
-        print("=" * 70)
-        current_mode = consistency['ampctrl_running']
-        if current_mode == 'residential':
-            print("\nRESIDENTIAL MODE (Current):")
+        print(f"\nCurrent Mode: {mode.upper()}")
+        if mode == 'residential':
+            print("\nRESIDENTIAL MODE:")
             print("  - 2 Stereo Zones")
             print("  - 4 Output channels: Z1L, Z1R, Z2L, Z2R")
             print("  - Typical use: Home theater / consumer applications")
         else:
-            print("\nCOMMERCIAL MODE (Current):")
+            print("\nCOMMERCIAL MODE:")
             print("  - 4 Mono Channels")
             print("  - 4 Output channels: CH1, CH2, CH3, CH4")
             print("  - Typical use: Distributed audio / commercial installations")
         
-        other_mode = 'commercial' if current_mode == 'residential' else 'residential'
+        # Show how to change mode
+        print("\n" + "=" * 70)
+        print("Changing Modes")
+        print("=" * 70)
+        
+        other_mode = 'commercial' if mode == 'residential' else 'residential'
+        mode_val = 1 if other_mode == 'commercial' else 0
+        
         print(f"\nTo switch to {other_mode.upper()} mode:")
-        print(f"  1. Run: AConfigControl set{'resid' if other_mode == 'residential' else 'comme'}boot")
-        print(f"  2. Reboot device")
-        print(f"  3. Verify with this script")
+        print(f"  1. Via SSH/script:")
+        print(f"     dsp_test mode {mode_val}")
+        print(f"  2. Or via console (if available):")
+        print(f"     aconfigcontrol set{'comme' if other_mode == 'commercial' else 'resid'}boot")
+        print(f"  3. Reboot device for change to take effect")
+        print(f"  4. Verify with: dsp_test mode")
         
         print("\n" + "=" * 70)
         print("✓ Mode verification complete")

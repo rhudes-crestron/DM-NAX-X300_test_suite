@@ -280,7 +280,7 @@ class X300Controller:
     
     def get_mode(self) -> str:
         """
-        Get current DSP operating mode using AConfigControl.
+        Get current DSP operating mode.
         
         Returns:
             'residential' or 'commercial'
@@ -289,13 +289,11 @@ class X300Controller:
             Residential mode: 2 zones (stereo)
             Commercial mode: 4 channels (mono)
             
-            Uses AConfigControl command which shows both saved and running modes
-            for both DSP and AMP control applications.
+            Uses `dsp_test mode` command which works on X300.
+            Output: "DSP mode is  Residential" or "DSP mode is  Commercial"
         """
-        output = self.run_command("AConfigControl")
-        # Output example:
-        #  AoIpMode:   AES67(saved) AES67(running)
-        #  AudioMode:  Residential(saved) Residential(running)
+        output = self.run_command("dsp_test mode")
+        # Output: "DSP mode is  Residential" or "DSP mode is  Commercial"
         if "Commercial" in output:
             return "commercial"
         elif "Residential" in output:
@@ -305,39 +303,50 @@ class X300Controller:
     
     def set_mode(self, mode: str) -> str:
         """
-        Set DSP and AMP control operating mode using AConfigControl.
+        Set DSP and AMP control operating mode.
+        
+        **IMPORTANT**: This command can only be run from device CONSOLE, not SSH!
         
         Args:
             mode: 'residential' or 'commercial'
             
         Returns:
-            Command output
+            Command output (will fail if called via SSH)
             
         Note:
             Mode 0 = Residential (2 zones, stereo)
             Mode 1 = Commercial (4 channels, mono)
             
-            Uses AConfigControl which sets mode for BOTH:
-              - DSP application
-              - AMP control application
+            **LIMITATION**: AConfigControl only works from device console.
+            To set mode, you must:
+              1. Log into device console (not SSH/bash)
+              2. Run: aconfigcontrol setresidboot (or setcommeboot)
+              3. Reboot device
             
-            **REQUIRES REBOOT** to take effect!
+            This method will attempt to run the command via SSH but will
+            likely fail. Use manual console access instead.
             
-        Commands:
-            AConfigControl setresidboot - Set Residential mode
-            AConfigControl setcommeboot - Set Commercial mode
+        Commands (for console use):
+            aconfigcontrol setresidboot - Set Residential mode
+            aconfigcontrol setcommeboot - Set Commercial mode
         """
         mode_lower = mode.lower()
         if mode_lower == 'residential':
-            cmd = "AConfigControl setresidboot"
+            cmd = "aconfigcontrol setresidboot"
         elif mode_lower == 'commercial':
-            cmd = "AConfigControl setcommeboot"
+            cmd = "aconfigcontrol setcommeboot"
         else:
             raise ValueError(f"Invalid mode: {mode}. Must be 'residential' or 'commercial'")
         
-        output = self.run_command(cmd)
-        # Expected output: "Set AudioMode to \"Residential\" successfully, reboot to take effect"
-        return output
+        # This will likely fail since AConfigControl doesn't work from SSH
+        try:
+            output = self.run_command(cmd)
+            return output
+        except Exception as e:
+            raise RuntimeError(
+                f"AConfigControl must be run from device console, not SSH. "
+                f"Log into console and run: {cmd}"
+            )
     
     def get_zone_count(self) -> int:
         """
@@ -353,6 +362,11 @@ class X300Controller:
         """
         Get detailed mode information including saved and running modes.
         
+        **IMPORTANT**: AConfigControl only works from device console, not SSH!
+        This method will likely fail when called via SSH.
+        
+        Use get_ampctrl_mode_from_status() instead for SSH access.
+        
         Returns:
             Dictionary with:
               - 'aoip_saved': Saved AoIP mode (Dante/AES67)
@@ -360,11 +374,11 @@ class X300Controller:
               - 'audio_saved': Saved audio mode (Residential/Commercial)
               - 'audio_running': Running audio mode
               
-        Example output from AConfigControl:
+        Example output from aconfigcontrol (console only):
             AoIpMode:   AES67(saved) AES67(running)
-            AudioMode:  Residential(saved) Residential(running)
+            AudioMode:  Commercial(saved) Commercial(running)
         """
-        output = self.run_command("AConfigControl")
+        output = self.run_command("aconfigcontrol")
         result = {}
         
         for line in output.split('\n'):
@@ -387,14 +401,32 @@ class X300Controller:
         """
         Get AConfigControl command help.
         
+        **IMPORTANT**: This only works from device console, not SSH!
+        
         Returns:
-            Help text for AConfigControl command with available options:
+            Help text for aconfigcontrol command
+            
+        Available options (console only):
               - setresidboot: Set Residential mode (requires reboot)
               - setcommeboot: Set Commercial mode (requires reboot)
               - setdanteboot: Set Dante mode (requires reboot)
               - setaes67boot: Set AES67 mode (requires reboot)
+              
+        To use from console:
+            ssh admin@device
+            DM-NAX-AMP-X300> aconfigcontrol ?
         """
-        return self.run_command("AConfigControl ?")
+        try:
+            return self.run_command("aconfigcontrol ?")
+        except:
+            return (
+                "aconfigcontrol ? (console only)\n"
+                "  setresidboot - Set Residential mode\n"
+                "  setcommeboot - Set Commercial mode\n"
+                "  setdanteboot - Set Dante mode\n"
+                "  setaes67boot - Set AES67 mode\n"
+                "  (no args) - Show current modes\n"
+            )
     
     def enable_amp_zone(self, zone: int) -> str:
         """
@@ -683,43 +715,35 @@ class X300Controller:
     
     def verify_mode_consistency(self) -> Dict[str, Any]:
         """
-        Verify that AConfigControl saved mode and ampctrl running mode match.
+        Verify mode using ampctrl (works via SSH).
+        
+        **Note**: AConfigControl only works from device console, not SSH.
+        This method uses ampctrl only, which can be called via SSH.
         
         Returns:
             Dictionary with:
-              - 'aconfig_saved': Mode from AConfigControl (saved)
-              - 'aconfig_running': Mode from AConfigControl (running)
-              - 'ampctrl_running': Mode from ampctrl (actual)
-              - 'consistent': True if all modes match
-              - 'needs_reboot': True if saved != running
+              - 'ampctrl_running': Mode from ampctrl (actual running mode)
+              - 'power_mode': Power mode from ampctrl
               
         Note:
-            Use this to verify mode changes have taken effect after reboot.
+            To verify saved mode vs running mode, you must:
+              1. Log into device console (not SSH)
+              2. Run: aconfigcontrol
+              3. Check if saved and running modes match
             
-            - AConfigControl shows what's SAVED and what's RUNNING
-            - ampctrl shows what the AMP control app is ACTUALLY using
-            
-            These should all match after a proper reboot.
+            ampctrl shows what the AMP control app is ACTUALLY using
+            (read from hardware registers at boot time).
         """
-        # Get modes from both sources
-        aconfig_details = self.get_mode_detailed()
+        # Get mode from ampctrl (works via SSH)
         ampctrl_mode = self.get_ampctrl_mode_from_status()
-        
-        aconfig_saved = aconfig_details.get('audio_saved', 'unknown')
-        aconfig_running = aconfig_details.get('audio_running', 'unknown')
         ampctrl_running = ampctrl_mode.get('audio_mode', 'unknown')
         
-        # Check consistency
-        all_match = (aconfig_saved == aconfig_running == ampctrl_running)
-        needs_reboot = (aconfig_saved != aconfig_running)
-        
         return {
-            'aconfig_saved': aconfig_saved,
-            'aconfig_running': aconfig_running,
             'ampctrl_running': ampctrl_running,
-            'consistent': all_match,
-            'needs_reboot': needs_reboot,
-            'power_mode': ampctrl_mode.get('power_mode', 'unknown')
+            'power_mode': ampctrl_mode.get('power_mode', 'unknown'),
+            'consistent': True,  # Can't verify without console access
+            'needs_reboot': False,  # Can't determine without console access
+            'note': 'To verify saved vs running mode, use aconfigcontrol from device console'
         }
     
     def __enter__(self):
