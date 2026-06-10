@@ -1,0 +1,127 @@
+# DM-NAX-X300 Test Suite Configuration
+# STM32MP1-based audio devices
+#
+# ═══════════════════════════════════════════════════════════════
+#  Model templates — shared config inherited by device instances
+# ═══════════════════════════════════════════════════════════════
+
+model_templates:
+  # ── X300 platform (STM32MP1-based audio matrix) ──
+  x300_base: &x300_base
+    platform: "STM32MP1"
+    processor: "STM32MP157C"
+    ssh_port: 6022  # X300 uses port 6022 for bash, port 22 for custom console
+    http_port: 80
+    https_port: 443
+    # Audio architecture (to be determined based on actual X300 specs)
+    zones: 4  # Update based on actual X300 capabilities
+    # DSP commands will differ from FPGA-based devices
+    dsp_commands:
+      tone_generator: "TBD"  # Replace with actual X300 command
+      mixer: "TBD"           # Replace with actual X300 command
+      state_read: "TBD"      # Replace with actual X300 command
+
+  # ── XLR I/O module ──
+  xlr_base: &xlr_base
+    <<: *x300_base
+    platform: "STM32MP1"
+    device_type: "XLR_IO"
+
+  # ── Bluetooth I/O module ──
+  btio_base: &btio_base
+    <<: *x300_base
+    platform: "STM32MP1"
+    device_type: "BT_IO"
+    has_bluetooth: true
+
+  # ── USB Audio interface ──
+  aud_usb_base: &aud_usb_base
+    <<: *x300_base
+    platform: "STM32MP1"
+    device_type: "AUD_USB"
+    has_usb_audio: true
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Device instances — one per physical DUT
+# ═══════════════════════════════════════════════════════════════
+devices:
+  DM-NAX-X300-001:
+    <<: *x300_base
+    ip: "192.168.1.246"
+    username: "admin"
+    password: "admin123"  # Default password - will be overridden if prompted
+    model: "X300"
+    hostname: "dm-nax-x300-001"
+    
+    # Audio inputs/outputs (update based on actual X300 hardware)
+    audio_inputs:
+      - { name: "Input01", type: "analog", channels: ["L", "R"] }
+      - { name: "Input02", type: "analog", channels: ["L", "R"] }
+      - { name: "Network01", type: "network", channels: ["L", "R"] }
+    
+    audio_outputs:
+      - { name: "Output01", type: "line", channels: ["L", "R"] }
+      - { name: "Output02", type: "line", channels: ["L", "R"] }
+      - { name: "Output03", type: "line", channels: ["L", "R"] }
+      - { name: "Output04", type: "line", channels: ["L", "R"] }
+    
+    # GPIO/Control (if applicable)
+    gpio_pins: []
+    
+    # Engineering/Debug settings
+    engineering_debug:
+      enabled: false
+      sudo_pass: ""  # UPDATE IF NEEDED
+
+  # ── Template for additional X300 devices ──
+  # DM-NAX-X300-002:
+  #   <<: *x300_base
+  #   ip: "10.x.x.x"
+  #   username: "admin"
+  #   password: "admin123"      # Default for X300 devices
+  #   model: "X300"
+
+  # ── XLR device example ──
+  # DM-NAX-XLR-001:
+  #   <<: *xlr_base
+  #   ip: "10.x.x.x"
+  #   username: "admin"
+  #   password: "admin123"      # Default for X300 devices
+  #   model: "XLR"
+
+
+# Test execution settings
+test_settings:
+  signal_settle_time_s: 1.5
+  route_settle_time_s: 0.5
+  level_tolerance_db: 1.0
+  mute_floor_db: -110.0
+  default_tone_freq_hz: 1000
+  default_tone_gain_db: -20
+  max_retries: 2
+  retry_delay_s: 2.0
+  
+  # X300-specific timeouts
+  command_timeout_s: 10
+  reboot_timeout_s: 120
+
+
+# Firmware upgrade settings (STM32MP1 uses different update mechanism)
+firmware:
+  firmware_dir: "/mnt/nightly/DM-NAX-X300"
+  remote_dir: "firmware"
+  update_method: "x300_update"  # Different from FPGA devices
+  
+  firmware_dirs:
+    DM-NAX-X300: "/mnt/nightly/DM-NAX-X300"
+    DM-NAX-XLR: "/mnt/nightly/DM-NAX-XLR"
+    DM-NAX-BTIO: "/mnt/nightly/DM-NAX-BTIO"
+
+
+# Web dashboard settings
+dashboard:
+  enabled: true
+  host: "0.0.0.0"
+  port: 5001  # Different port from FPGA test suite (5000)
+  title: "DM-NAX X300 Test Dashboard"
