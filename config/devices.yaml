@@ -52,6 +52,25 @@ model_templates:
         8: { input: "Input12", port: 60008, tone_hz: 12000 }
       audio_server_port: 8088
 
+  # ── X300 platform (STM32MP1, 2 zones residential / 9 channels commercial) ──
+  nax_x300: &nax_x300
+    platform: "STM32MP1"
+    ssh_port: 6022  # Bash port where ampctrl works
+    zones: 2  # Residential mode default (can be 9 in Commercial mode)
+    controller_type: "x300"  # Force X300Controller usage
+    amp_outputs: ["A1","A2","A3","A4"]  # X300 uses mono channel naming (zone 1 = A1/A2, zone 2 = A3/A4)
+    line_outputs: ["L1","L2","L3","L4"]  # Line outputs on X300
+    network_outputs: ["N1","N2","N3","N4"]  # Network outputs on X300
+    has_speaker_protect: false
+    dsp_tone_input: "Input01"
+    dsp_fw_version: 42  # X300 uses fw42-like tone/mixer architecture despite FW version 36
+    signal_generator: { channel: 20, name: "SIG" }  # Signal generator channel on X300
+    mixer_outputs: 4  # 2 stereo zones = 4 outputs (residential mode)
+    # X300-specific settings
+    mode: "residential"  # residential (2 zones) or commercial (9 channels)
+    uses_cresnext: true  # X300 uses CresNext database for settings
+    uses_dsp_script: true  # X300 supports dsp_script for cleaner output
+
 
 # ═══════════════════════════════════════════════════════════════
 #  Device instances — one per physical DUT
@@ -141,6 +160,22 @@ devices:
     signal_generator: { channel: 0, name: "T1L" }
     mixer_outputs: 16
 
+  # ── X300 STM32MP1-based devices ──
+  DM-NAX-X300:
+    <<: *nax_x300
+    ip: "192.168.1.175"  # X300 device IP
+    username: "admin"
+    password: "admin123"
+    model: "X300"
+    mode: "residential"  # residential (2 zones) or commercial (9 channels)
+    # X300 uses different channel mapping than 8ZSA:
+    # Residential: Input01 (Ch 0-1 L/R), Input02 (Ch 2-3 L/R)
+    # Commercial: Ch 1-4 (LineIn1-4), Ch 5-9 (Streaming)
+    physical_inputs:
+      Input01: { channels: ["Ch0","Ch1"], index: [0,1], type: "input_source" }
+      Input02: { channels: ["Ch2","Ch3"], index: [2,3], type: "input_source" }
+    # Note: X300 doesn't require engineering_debug like 8ZSA
+
   # ── To add a new device, copy this block: ──
   # DM-NAX-NEW:
   #   <<: *nax_8zone            # or *nax_4zone
@@ -164,6 +199,7 @@ zone_profiles:
     DM-NAX-8ZSA: [1, 3, 5, 7]   # odd zones only — even zones (2,4) have fw bug: Bass/Treble API no-ops
     DM-NAX-4ZSP: [1, 3]          # 4-zone device
     DM-NAX-4ZSA: [1, 3]          # 4-zone device
+    DM-NAX-X300: [1]             # 2-zone device (residential mode)
 
 # Firmware upgrade settings
 firmware:

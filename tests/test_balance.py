@@ -45,13 +45,26 @@ class TestBalance:
     CATEGORY = "dsp_balance"
 
     @staticmethod
-    def _output_info(zone):
+    def _output_info(zone, device_cfg):
         """Map zone number to (left_idx, right_idx, left_name, right_name).
 
         Zone N → A{N}L / A{N}R → DSP output channels (N-1)*2 and (N-1)*2+1.
+        
+        For devices with different naming (e.g., X300), use amp_outputs from device_cfg.
         """
         left_idx = (zone - 1) * 2
-        return left_idx, left_idx + 1, f"A{zone}L", f"A{zone}R"
+        amp_outputs = device_cfg.get("amp_outputs", [])
+        
+        # If amp_outputs is defined and has enough entries, use those names
+        if amp_outputs and len(amp_outputs) > left_idx + 1:
+            left_name = amp_outputs[left_idx]
+            right_name = amp_outputs[left_idx + 1]
+        else:
+            # Default to 8ZSA naming convention
+            left_name = f"A{zone}L"
+            right_name = f"A{zone}R"
+        
+        return left_idx, left_idx + 1, left_name, right_name
 
     def _setup_zone(self, dsp, device_cfg, zone):
         """Route signal generator to the zone's L+R amp outputs.
@@ -67,7 +80,7 @@ class TestBalance:
         fw21: tone on dsp.sig_ch (ch28=SIG), mixer routes to both L and R outputs.
               Balance on fw21 is applied in the output zone chain (post-mixer).
         """
-        left_idx, right_idx, _, _ = self._output_info(zone)
+        left_idx, right_idx, _, _ = self._output_info(zone, device_cfg)
         sig_ch = dsp.sig_ch_for_output(left_idx)
 
         if device_cfg.get("dsp_fw_version", 21) >= 42:
@@ -88,14 +101,14 @@ class TestBalance:
             dsp.set_mixer(sig_ch, left_idx, 0)
             dsp.set_mixer(sig_ch, right_idx, 0)
 
-    def _measure_lr(self, dsp, zone, settle_s):
+    def _measure_lr(self, dsp, device_cfg, zone, settle_s):
         """Read L/R output levels for the zone from a single DSP snapshot.
 
         Retries once if the expected outputs are missing (SSH truncation on
         dual-block 8ZSA sometimes omits the second DSP block).
         """
         time.sleep(settle_s)
-        _, _, left_name, right_name = self._output_info(zone)
+        _, _, left_name, right_name = self._output_info(zone, device_cfg)
         for attempt in range(2):
             state = dsp.read_dsp_state()
             out_l = state.outputs.get(left_name)
@@ -106,7 +119,7 @@ class TestBalance:
         assert out_l and out_r, f"{left_name}/{right_name} outputs not found in DSP state"
         return out_l.output_db, out_r.output_db
 
-    def _assert_balance_direction(self, dsp, zone, test_settings, prefer_left):
+    def _assert_balance_direction(self, dsp, device_cfg, zone, test_settings, prefer_left):
         """Poll until balance direction is reflected in the DSP outputs."""
         settle = float(test_settings["signal_settle_time_s"])
         mute_floor = float(test_settings["mute_floor_db"])
@@ -116,7 +129,7 @@ class TestBalance:
         last_l = float("-inf")
         last_r = float("-inf")
         while time.time() < deadline:
-            level_l, level_r = self._measure_lr(dsp, zone, settle)
+            level_l, level_r = self._measure_lr(dsp, device_cfg, zone, settle)
             last_l, last_r = level_l, level_r
             if prefer_left:
                 if (level_l > mute_floor) and (level_l >= level_r + margin_db):
@@ -125,7 +138,7 @@ class TestBalance:
                 if (level_r > mute_floor) and (level_r >= level_l + margin_db):
                     return
 
-        _, _, left_name, right_name = self._output_info(zone)
+        _, _, left_name, right_name = self._output_info(zone, device_cfg)
         direction = "left" if prefer_left else "right"
         raise AssertionError(
             f"Zone {zone} balance {direction} not reflected: "
@@ -135,7 +148,7 @@ class TestBalance:
     @pytest.mark.parametrize("zone", ALL_ZONES)
     def test_balance_center(self, dsp, cresnext, device_cfg, test_settings, zone):
         """At center balance (0), both L and R outputs have equal level."""
-        _, _, left_name, right_name = self._output_info(zone)
+        _, _, left_name, right_name = self._output_info(zone, device_cfg)
         if left_name not in device_cfg.get("amp_outputs", []):
             pytest.skip(f"{left_name} not available on {device_cfg['model']}")
 
@@ -143,7 +156,7 @@ class TestBalance:
         cresnext.set_zone_audio(zone, Volume=800, IsMuted=False)
 
         time.sleep(test_settings["signal_settle_time_s"])
-        level_l, level_r = self._measure_lr(dsp, zone, 0)
+        level_l, level_r = self._measure_lr(dsp, device_cfg, zone, 0)
 
         assert level_l > test_settings["mute_floor_db"], f"No signal at {left_name}"
         diff = abs(level_l - level_r)
@@ -156,23 +169,23 @@ class TestBalance:
     @pytest.mark.parametrize("zone", ALL_ZONES)
     def test_balance_full_left(self, dsp, cresnext, device_cfg, test_settings, zone):
         """Full left balance (-500) attenuates the right channel."""
-        _, _, left_name, _ = self._output_info(zone)
+        _, _, left_name, _ = self._output_info(zone, device_cfg)
         if left_name not in device_cfg.get("amp_outputs", []):
             pytest.skip(f"{left_name} not available on {device_cfg['model']}")
 
         self._setup_zone(dsp, device_cfg, zone)
         cresnext.set_zone_audio(zone, Volume=800, IsMuted=False)
         dsp.set_zone_balance(zone, -500)
-        self._assert_balance_direction(dsp, zone, test_settings, prefer_left=True)
+        self._assert_balance_direction(dsp, device_cfg, zone, test_settings, prefer_left=True)
 
     @pytest.mark.parametrize("zone", ALL_ZONES)
     def test_balance_full_right(self, dsp, cresnext, device_cfg, test_settings, zone):
         """Full right balance (+500) attenuates the left channel."""
-        _, _, left_name, _ = self._output_info(zone)
+        _, _, left_name, _ = self._output_info(zone, device_cfg)
         if left_name not in device_cfg.get("amp_outputs", []):
             pytest.skip(f"{left_name} not available on {device_cfg['model']}")
 
         self._setup_zone(dsp, device_cfg, zone)
         cresnext.set_zone_audio(zone, Volume=800, IsMuted=False)
         dsp.set_zone_balance(zone, 500)
-        self._assert_balance_direction(dsp, zone, test_settings, prefer_left=False)
+        self._assert_balance_direction(dsp, device_cfg, zone, test_settings, prefer_left=False)

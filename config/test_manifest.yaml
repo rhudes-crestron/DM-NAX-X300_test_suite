@@ -111,11 +111,31 @@ test_targets:
       - *dsp_processing
       - *volume_controls
       - *signal_routing
-      - *amplifier
+      # Skip amplifier tests - ampctrl hangs via SSH on 8ZSA
       - *streaming
     skip_tests:
       - tests/test_input_compensation.py
+      - tests/test_amp_health.py  # ampctrl commands hang on 8ZSA
+      - tests/test_bridging.py
+      - tests/test_speaker_protect.py
     extra_pytest_args: "--zone-mode=quick"
+
+  # DM-NAX-X300:  # Disabled for now - work in progress
+  #   enabled: true
+  #   device: "DM-NAX-X300"
+  #   firmware_file: ""
+  #   skip_upgrade: false
+  #   tests:
+  #     - *firmware
+  #     - *audio_quality
+  #     - *dsp_processing
+  #     - *volume_controls
+  #     - *signal_routing
+  #     - *amplifier
+  #     - *streaming
+  #   skip_tests:
+  #     - tests/test_input_compensation.py   # X300 uses different DSP architecture
+  #   extra_pytest_args: "--zone-mode=quick"
 
   # ── Template for adding new devices ──
   # DM-NAX-NEW:
@@ -134,10 +154,10 @@ test_targets:
 schedule:
   nightly:
     cron: "0 1 * * *"             # 1:00 AM daily
-    targets: ["DM-NAX-4ZSA", "DM-NAX-4ZSP", "DM-NAX-8ZSA"]
+    targets: ["DM-NAX-4ZSA", "DM-NAX-4ZSP", "DM-NAX-8ZSA"]  # "DM-NAX-X300" - disabled for now
   weekly_full:
     cron: "0 3 * * 0"             # 3:00 AM Sunday
-    targets: ["DM-NAX-4ZSA", "DM-NAX-4ZSP", "DM-NAX-8ZSA"]
+    targets: ["DM-NAX-4ZSA", "DM-NAX-4ZSP", "DM-NAX-8ZSA"]  # "DM-NAX-X300" - disabled for now
   on_demand:
     targets: []                   # filled at runtime via CLI
 

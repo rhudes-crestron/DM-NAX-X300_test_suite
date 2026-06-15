@@ -20,22 +20,51 @@ class TestVolume:
     CATEGORY = "dsp_volume"
 
     @staticmethod
-    def _output_info(zone):
-        """Zone N -> left amp output index and output name (A{N}L)."""
-        return (zone - 1) * 2, f"A{zone}L"
+    def _output_info(zone, device_cfg):
+        """Zone N -> left amp output index and output name.
+        
+        Returns the left (first) channel for the zone.
+        For 8ZSA: Zone 1 = A1L, Zone 2 = A2L, etc.
+        For X300: Zone 1 = A1, Zone 2 = A3, etc.
+        """
+        output_idx = (zone - 1) * 2
+        amp_outputs = device_cfg.get("amp_outputs", [])
+        
+        if amp_outputs and len(amp_outputs) > output_idx:
+            out_name = amp_outputs[output_idx]
+        else:
+            # Default to 8ZSA naming
+            out_name = f"A{zone}L"
+        
+        return output_idx, out_name
 
     def _setup_signal(self, dsp, device_cfg, zone):
-        """Inject signal generator tone and route to a zone's left output."""
-        output_idx, _ = self._output_info(zone)
+        """Inject signal generator tone and route to a zone's left output.
+        
+        fw42 architecture: start tone on the input channel and use mixer
+        fw21 architecture: use signal generator and route_sig_to_output
+        """
+        output_idx, _ = self._output_info(zone, device_cfg)
         sig_ch = dsp.sig_ch_for_output(output_idx)
-        dsp.start_tone(sig_ch, dsp.settings["default_tone_freq_hz"],
-                       dsp.settings["default_tone_gain_db"])
-        dsp.route_sig_to_output(output_idx)
+        
+        if device_cfg.get("dsp_fw_version", 21) >= 42:
+            # fw42: tone on input channel, route via mixer
+            dsp.start_tone(output_idx, dsp.settings["default_tone_freq_hz"],
+                           dsp.settings["default_tone_gain_db"])
+            if dsp.cn is not None:
+                dsp._set_tone_source_for_zone(zone)
+            dsp.clear_all_sig_routes()
+            dsp.set_mixer(output_idx, output_idx, 0)
+        else:
+            # fw21: signal generator routed to output
+            dsp.start_tone(sig_ch, dsp.settings["default_tone_freq_hz"],
+                           dsp.settings["default_tone_gain_db"])
+            dsp.route_sig_to_output(output_idx)
 
     @pytest.mark.parametrize("zone", ALL_ZONES)
     def test_volume_default(self, dsp, device_cfg, test_settings, zone):
         """At default volume (800 = 0dB), signal passes at expected level."""
-        _, out_name = self._output_info(zone)
+        _, out_name = self._output_info(zone, device_cfg)
         if out_name not in device_cfg.get("amp_outputs", []):
             pytest.skip(f"{out_name} not available on {device_cfg['model']}")
 
@@ -57,7 +86,7 @@ class TestVolume:
     def test_volume_levels(self, dsp, device_cfg, test_settings,
                            zone, volume_value, description):
         """Volume changes produce proportional output level changes."""
-        _, out_name = self._output_info(zone)
+        _, out_name = self._output_info(zone, device_cfg)
         if out_name not in device_cfg.get("amp_outputs", []):
             pytest.skip(f"{out_name} not available on {device_cfg['model']}")
 
@@ -110,7 +139,7 @@ class TestVolume:
     @pytest.mark.parametrize("zone", ALL_ZONES)
     def test_volume_monotonic_decrease(self, dsp, device_cfg, test_settings, zone):
         """Decreasing volume should monotonically decrease output level."""
-        _, out_name = self._output_info(zone)
+        _, out_name = self._output_info(zone, device_cfg)
         if out_name not in device_cfg.get("amp_outputs", []):
             pytest.skip(f"{out_name} not available on {device_cfg['model']}")
 

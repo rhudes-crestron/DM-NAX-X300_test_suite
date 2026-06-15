@@ -93,9 +93,10 @@ def _parse_int(s, default=0):
 def parse_dsp_output(raw_output):
     """Parse the full `dsp` command output into a DSPState object.
 
-    Supports two firmware formats:
+    Supports three firmware formats:
       - fw21 (4ZSA): |00|S1L  |-|...  |     A1L|  0|
       - fw42 (4ZSP/8ZSA): | T1L |(  0.0) -inf |  | 0| Z1L |...
+      - fw36 (X300): |00| L1 |E| 13|   -inf  ... |  A1| 0|x-|0|0| |
     Auto-detects format from the output content.
     """
     state = DSPState()
@@ -117,11 +118,16 @@ def parse_dsp_output(raw_output):
         if m:
             state.master_volume_db = float(m.group(1))
 
+    # Detect fw36 format (X300): contains "[Mode:RESI]" in header
+    is_fw36 = any("[Mode:RESI]" in line or "[Mode:COMM]" in line for line in lines)
+    
     # Detect fw42 format: header lines contain "Amp" and "flow" (on separate lines)
     is_fw42 = (any("| Amp |" in line for line in lines)
                and any("| flow|" in line for line in lines))
 
-    if is_fw42:
+    if is_fw36:
+        _parse_fw36_data(lines, state)
+    elif is_fw42:
         _parse_fw42_data(lines, state)
     else:
         _parse_fw21_data(lines, state)
@@ -251,6 +257,131 @@ def _parse_fw42_data(lines, state):
         state.outputs[mapped_name] = out
         if mapped_name != out_name_raw:
             state.outputs[out_name_raw] = out
+
+
+def _parse_fw36_data(lines, state):
+    """Parse fw36 format (X300).
+
+    Data rows:
+    |00| L1 |E| 13|   -inf    0@-inf (  0.0)    -inf |   -inf|00|(  0.0/  0.0)    -inf    -inf ( -2.0) (  0.0)    -inf    -inf |  A1| 0|x-|0|0| |
+    
+    Sections separated by '|':
+      [1] Input channel index (00-11)
+      [2] Input name (L1-L4, N1-N4, SG)
+      [3] P flag (E for enabled, blank otherwise)
+      [4] PGA value (ADC gain)
+      [5] Raw Level, Test (freq@gain), Input Gain, Level
+      [6] Mixer Level
+      [7] Output channel index (00-11)
+      [8] Balance/Trim, Ducker, AGC, (Trim), (Gain), Limiter, Output
+      [9] Output name (A1-A4, L1-L4, N1-N4)
+      [10+] Additional flags (D, RM, A, B, R)
+    """
+    # Match data rows: starts with "|" followed by 2-digit channel index
+    row_re = re.compile(r"^\|(\d{2})\|\s*(\w*)\s*\|")
+
+    for line in lines:
+        rm = row_re.match(line)
+        if not rm:
+            continue
+
+        input_idx_str = rm.group(1)
+        input_name = rm.group(2).strip()
+        
+        # Skip rows with no input name (continuation rows for signal generator)
+        if not input_name:
+            continue
+
+        input_idx = int(input_idx_str)
+
+        # Split by "|" — parts[0] is empty (before first |)
+        parts = [p for p in line.split("|")]
+        if len(parts) < 10:
+            continue
+
+        # --- Input section ---
+        # parts[1] = input index (already parsed)
+        # parts[2] = input name (already parsed)
+        # parts[3] = P flag
+        # parts[4] = PGA value
+        # parts[5] = input levels and test tone info
+        input_section = parts[5]  # "   -inf    0@-inf (  0.0)    -inf"
+        
+        # Parse test tone: freq@gain
+        test_freq = 0
+        test_gain_db = float("-inf")
+        tone_m = re.search(r"(\d+)@\s*([-\d.inf]+)", input_section)
+        if tone_m:
+            test_freq = int(tone_m.group(1))
+            test_gain_db = _parse_float(tone_m.group(2))
+
+        # Parse input gain: (value)
+        input_gain_m = re.search(r"\(\s*([-\d.]+)\)", input_section)
+        input_gain_db = _parse_float(input_gain_m.group(1)) if input_gain_m else 0.0
+
+        # Parse input level: last value in section
+        level_parts = input_section.split()
+        input_level_db = _parse_float(level_parts[-1]) if level_parts else float("-inf")
+
+        # --- Mixer section ---
+        mixer_level = _parse_float(parts[6].strip()) if parts[6].strip() else float("-inf")
+
+        # --- Output section ---
+        # parts[7] = output index
+        output_idx_str = parts[7].strip()
+        if not output_idx_str or not output_idx_str.isdigit():
+            # Some rows may not have output section
+            continue
+        output_idx = int(output_idx_str)
+
+        # parts[8] = output processing chain
+        output_section = parts[8]  # "(  0.0/  0.0)    -inf    -inf ( -2.0) (  0.0)    -inf    -inf"
+        
+        # Parse Balance / Trim: (bal / trim)
+        bal_trim_m = re.search(r"\(\s*([-\d.inf]+)\s*/\s*([-\d.inf]+)\)", output_section)
+        balance_db = 0.0
+        trim_db = 0.0
+        if bal_trim_m:
+            balance_db = _parse_float(bal_trim_m.group(1))
+            trim_db = _parse_float(bal_trim_m.group(2))
+
+        # Parse output values: after balance/trim, we have: ducker agc (trim) (gain) lim output
+        # Split and extract values
+        values = []
+        # Remove parenthesized values and extract remaining numbers
+        cleaned = re.sub(r'\([^)]+\)', '', output_section)
+        for match in re.finditer(r'[-\d.inf]+', cleaned):
+            values.append(_parse_float(match.group()))
+
+        # Extract values (may vary, so handle gracefully)
+        ducker_db = values[0] if len(values) > 0 else float("-inf")
+        agc_db = values[1] if len(values) > 1 else float("-inf")
+        limiter_db = values[2] if len(values) > 2 else float("-inf")
+        output_db = values[3] if len(values) > 3 else float("-inf")
+
+        # parts[9] = output name
+        output_name = parts[9].strip()
+
+        # --- Create input channel ---
+        in_ch = InputChannel(
+            index=input_idx, name=input_name, routed=True,
+            vcg="", ag="", dv_o="", has_adc=(parts[3].strip() == "E"),
+            test_freq=test_freq, test_gain_db=test_gain_db,
+            gain_db=input_gain_db, level_db=input_level_db
+        )
+        state.inputs[input_name] = in_ch
+
+        # --- Create output channel ---
+        out_ch = OutputChannel(
+            index=output_idx, name=output_name,
+            balance_db=balance_db, trim=trim_db,
+            ducker_db=ducker_db, agc_db=agc_db, agc_gain_db=0.0,
+            limiter_db=limiter_db, output_db=output_db,
+            invert=0, delay_ms=0,
+            is_passthrough=False, passthrough_input="",
+            passthrough_level_db=float("-inf")
+        )
+        state.outputs[output_name] = out_ch
 
 
 def _parse_fw21_data(lines, state):
