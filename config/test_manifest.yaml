@@ -120,22 +120,22 @@ test_targets:
       - tests/test_speaker_protect.py
     extra_pytest_args: "--zone-mode=quick"
 
-  # DM-NAX-X300:  # Disabled for now - work in progress
-  #   enabled: true
-  #   device: "DM-NAX-X300"
-  #   firmware_file: ""
-  #   skip_upgrade: false
-  #   tests:
-  #     - *firmware
-  #     - *audio_quality
-  #     - *dsp_processing
-  #     - *volume_controls
-  #     - *signal_routing
-  #     - *amplifier
-  #     - *streaming
-  #   skip_tests:
-  #     - tests/test_input_compensation.py   # X300 uses different DSP architecture
-  #   extra_pytest_args: "--zone-mode=quick"
+  DM-NAX-X300:
+    enabled: true
+    device: "DM-NAX-X300"
+    firmware_file: ""
+    skip_upgrade: false
+    tests:
+      - *firmware
+      - *audio_quality
+      - *dsp_processing
+      - *volume_controls
+      - *signal_routing
+      - *amplifier
+      - *streaming
+    skip_tests:
+      - tests/test_input_compensation.py   # X300 uses different DSP architecture
+    extra_pytest_args: "--zone-mode=quick"
 
   # ── Template for adding new devices ──
   # DM-NAX-NEW:
