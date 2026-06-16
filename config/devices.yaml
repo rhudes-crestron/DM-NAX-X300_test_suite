@@ -1,127 +1,246 @@
-# DM-NAX-X300 Test Suite Configuration
-# STM32MP1-based audio devices
+# DM-NAX DSP Test Suite Configuration
 #
 # ═══════════════════════════════════════════════════════════════
-#  Model templates — shared config inherited by device instances
+#  Model templates — shared config inherited by device instances.
+#  To add a new device:
+#    1. Pick the matching template (&nax_4zone or &nax_8zone)
+#    2. Add a new entry under 'devices:' with  <<: *nax_Xzone
+#    3. Override only device-specific keys (ip, model, password, physical_inputs, etc.)
 # ═══════════════════════════════════════════════════════════════
 
 model_templates:
-  # ── X300 platform (STM32MP1-based audio matrix) ──
-  x300_base: &x300_base
-    platform: "STM32MP1"
-    processor: "STM32MP157C"
-    ssh_port: 6022  # X300 uses port 6022 for bash, port 22 for custom console
-    http_port: 80
-    https_port: 443
-    # Audio architecture (to be determined based on actual X300 specs)
-    zones: 4  # Update based on actual X300 capabilities
-    # DSP commands will differ from FPGA-based devices
-    dsp_commands:
-      tone_generator: "TBD"  # Replace with actual X300 command
-      mixer: "TBD"           # Replace with actual X300 command
-      state_read: "TBD"      # Replace with actual X300 command
+  # ── 4-zone platform (fw21, 4 amp pairs, 4 streaming inputs) ──
+  nax_4zone: &nax_4zone
+    zones: 4
+    amp_outputs: ["A1L","A1R","A2L","A2R","A3L","A3R","A4L","A4R"]
+    line_outputs: ["L1L","L1R"]
+    network_outputs: ["N1L","N1R","N2L","N2R","N3L","N3R","N4L","N4R"]
+    dsp_fw_version: 21
+    has_speaker_protect: false
+    ssh_port: 22
+    dsp_tone_input: "Input01"
+    streaming:
+      base_port: 60001
+      zones:
+        1: { input: "Input05", port: 60001, tone_hz: 100 }
+        2: { input: "Input06", port: 60002, tone_hz: 200 }
+        3: { input: "Input07", port: 60003, tone_hz: 400 }
+        4: { input: "Input08", port: 60004, tone_hz: 800 }
+      audio_server_port: 8088
 
-  # ── XLR I/O module ──
-  xlr_base: &xlr_base
-    <<: *x300_base
-    platform: "STM32MP1"
-    device_type: "XLR_IO"
+  # ── 8-zone platform (fw42, 8 amp pairs, 8 streaming inputs) ──
+  nax_8zone: &nax_8zone
+    zones: 8
+    amp_outputs: ["A1L","A1R","A2L","A2R","A3L","A3R","A4L","A4R","A5L","A5R","A6L","A6R","A7L","A7R","A8L","A8R"]
+    line_outputs: ["L1L","L1R"]
+    network_outputs: ["N1L","N1R","N2L","N2R","N3L","N3R","N4L","N4R"]
+    dsp_fw_version: 42
+    has_speaker_protect: true
+    ssh_port: 22
+    dsp_tone_input: "Input01"
+    streaming:
+      base_port: 60001
+      local_ip: "10.10.10.2"   # MediaStreamer binds to this IP on iMX8 (fw42) devices
+      zones:
+        1: { input: "Input05", port: 60001, tone_hz: 100 }
+        2: { input: "Input06", port: 60002, tone_hz: 200 }
+        3: { input: "Input07", port: 60003, tone_hz: 400 }
+        4: { input: "Input08", port: 60004, tone_hz: 800 }
+        5: { input: "Input09", port: 60005, tone_hz: 1500 }
+        6: { input: "Input10", port: 60006, tone_hz: 3000 }
+        7: { input: "Input11", port: 60007, tone_hz: 6000 }
+        8: { input: "Input12", port: 60008, tone_hz: 12000 }
+      audio_server_port: 8088
 
-  # ── Bluetooth I/O module ──
-  btio_base: &btio_base
-    <<: *x300_base
+  # ── X300 platform (STM32MP1, 2 zones residential / 9 channels commercial) ──
+  nax_x300: &nax_x300
     platform: "STM32MP1"
-    device_type: "BT_IO"
-    has_bluetooth: true
-
-  # ── USB Audio interface ──
-  aud_usb_base: &aud_usb_base
-    <<: *x300_base
-    platform: "STM32MP1"
-    device_type: "AUD_USB"
-    has_usb_audio: true
+    ssh_port: 6022  # Bash port where ampctrl works
+    zones: 2  # Residential mode default (can be 9 in Commercial mode)
+    controller_type: "x300"  # Force X300Controller usage
+    amp_outputs: ["A1","A2","A3","A4"]  # X300 uses mono channel naming (zone 1 = A1/A2, zone 2 = A3/A4)
+    line_outputs: ["L1","L2","L3","L4"]  # Line outputs on X300
+    network_outputs: ["N1","N2","N3","N4"]  # Network outputs on X300
+    has_speaker_protect: false
+    dsp_tone_input: "Input01"
+    dsp_fw_version: 42  # X300 uses fw42-like tone/mixer architecture despite FW version 36
+    signal_generator: { channel: 20, name: "SIG" }  # Signal generator channel on X300
+    mixer_outputs: 4  # 2 stereo zones = 4 outputs (residential mode)
+    # X300-specific settings
+    mode: "residential"  # residential (2 zones) or commercial (9 channels)
+    uses_cresnext: true  # X300 uses CresNext database for settings
+    uses_dsp_script: true  # X300 supports dsp_script for cleaner output
 
 
 # ═══════════════════════════════════════════════════════════════
 #  Device instances — one per physical DUT
 # ═══════════════════════════════════════════════════════════════
 devices:
-  DM-NAX-X300-001:
-    <<: *x300_base
-    ip: "192.168.1.246"
+  DM-NAX-4ZSA:
+    <<: *nax_4zone
+    ip: "10.253.38.221"
     username: "admin"
-    password: "admin123"  # Default password - will be overridden if prompted
-    model: "X300"
-    hostname: "dm-nax-x300-001"
-    
-    # Audio inputs/outputs (update based on actual X300 hardware)
-    audio_inputs:
-      - { name: "Input01", type: "analog", channels: ["L", "R"] }
-      - { name: "Input02", type: "analog", channels: ["L", "R"] }
-      - { name: "Network01", type: "network", channels: ["L", "R"] }
-    
-    audio_outputs:
-      - { name: "Output01", type: "line", channels: ["L", "R"] }
-      - { name: "Output02", type: "line", channels: ["L", "R"] }
-      - { name: "Output03", type: "line", channels: ["L", "R"] }
-      - { name: "Output04", type: "line", channels: ["L", "R"] }
-    
-    # GPIO/Control (if applicable)
-    gpio_pins: []
-    
-    # Engineering/Debug settings
+    password: "admin123"
+    model: "4ZSA"
+    physical_inputs:
+      S1: { channels: ["S1L","S1R"], index: [0,1], type: "stream" }
+      T1: { channels: ["T1L","T1R"], index: [2,3], type: "stream" }
+      L1: { channels: ["L1L","L1R"], index: [4,5], type: "line", has_adc: true }
+      L2: { channels: ["L2L","L2R"], index: [6,7], type: "line", has_adc: true }
+    signal_generator: { channel: 28, name: "SIG" }
+    mixer_outputs: 10
     engineering_debug:
-      enabled: false
-      sudo_pass: ""  # UPDATE IF NEEDED
+      auto_enable_for_streaming: true
+      sudo_pass: "Ykh3t5tcjKuhGeoh"
+      zip_file: ""
+      search_roots: []
+      set_current_datetime: false
+      remote_zip_path: "firmware/engineering_debug.zip"
 
-  # ── Template for additional X300 devices ──
-  # DM-NAX-X300-002:
-  #   <<: *x300_base
+  DM-NAX-8ZSA:
+    <<: *nax_8zone
+    ip: "dm-nax-8zsa-00107fb5d1e3"
+    username: "admin"
+    password: "Crestron123"
+    model: "8ZSA"
+    physical_inputs:
+      S1: { channels: ["S1L","S1R"], index: [0,1], type: "stream" }
+      T1: { channels: ["T1L","T1R"], index: [2,3], type: "stream" }
+      L1: { channels: ["L1L","L1R"], index: [4,5], type: "line", has_adc: true }
+      L2: { channels: ["L2L","L2R"], index: [6,7], type: "line", has_adc: true }
+    signal_generator:      { channel: 0, name: "T1L" }   # DSP block 0 (zones 1-4)
+    signal_generator_dsp1: { channel: 8, name: "T2L" }   # DSP block 1 (zones 5-8)
+    mixer_outputs: 16   # two 8-ch DSP blocks = 16 mixer outputs
+    engineering_debug:
+      auto_enable_for_streaming: true
+      sudo_pass: "NHPchCdpeGFdRbtf"
+      zip_file: ""
+      search_roots: []
+      smb_username: "builduser"
+      smb_password: "password"
+      smb_domain: ""
+      set_current_datetime: false
+      remote_zip_path: "firmware/engineering_debug.zip"
+
+  DM-NAX-4ZSP:
+    <<: *nax_8zone          # uses fw42 DSP routing paths
+    ip: "dm-nax-4zsp-00107fca06ff"
+    username: "admin"
+    password: "crestron"
+    model: "4ZSP"
+    engineering_debug:
+      auto_enable_for_streaming: true
+      sudo_pass: "l5P2oZkOafUX2TwM"
+      zip_file: ""
+      search_roots: []
+      set_current_datetime: false
+      remote_zip_path: "firmware/engineering_debug.zip"
+    # 4ZSP has 4 physical zones despite sharing the fw42 DSP platform
+    zones: 4
+    amp_outputs: ["A1L","A1R","A2L","A2R","A3L","A3R","A4L","A4R"]
+    streaming:
+      base_port: 60001
+      local_ip: "10.10.10.2"   # MediaStreamer binds to this IP on iMX8 (fw42) devices
+      zones:
+        1: { input: "Input05", port: 60001, tone_hz: 100 }
+        2: { input: "Input06", port: 60002, tone_hz: 200 }
+        3: { input: "Input07", port: 60003, tone_hz: 400 }
+        4: { input: "Input08", port: 60004, tone_hz: 800 }
+      audio_server_port: 8088
+    physical_inputs:
+      # fw42 DSP: two 8-channel blocks (ch 0-7 = DSP0, ch 8-15 = DSP1)
+      T1: { channels: ["T1L","T1R"], index: [0,1], type: "stream" }
+      S1: { channels: ["S1L","S1R"], index: [2,3], type: "stream" }
+      A1: { channels: ["A1L","A1R"], index: [4,5], type: "line", has_adc: true }
+      A2: { channels: ["A2L","A2R"], index: [6,7], type: "line", has_adc: true }
+      T2: { channels: ["T2L","T2R"], index: [8,9], type: "stream" }
+      S2: { channels: ["S2L","S2R"], index: [10,11], type: "stream" }
+      A3: { channels: ["A3L","A3R"], index: [12,13], type: "line", has_adc: true }
+      A4: { channels: ["A4L","A4R"], index: [14,15], type: "line", has_adc: true }
+    signal_generator: { channel: 0, name: "T1L" }
+    mixer_outputs: 16
+
+  # ── X300 STM32MP1-based devices ──
+  DM-NAX-X300:
+    <<: *nax_x300
+    ip: "192.168.1.175"  # X300 device IP
+    username: "admin"
+    password: "admin123"
+    model: "X300"
+    mode: "residential"  # residential (2 zones) or commercial (9 channels)
+    # X300 uses different channel mapping than 8ZSA:
+    # Residential: Input01 (Ch 0-1 L/R), Input02 (Ch 2-3 L/R)
+    # Commercial: Ch 1-4 (LineIn1-4), Ch 5-9 (Streaming)
+    physical_inputs:
+      Input01: { channels: ["Ch0","Ch1"], index: [0,1], type: "input_source" }
+      Input02: { channels: ["Ch2","Ch3"], index: [2,3], type: "input_source" }
+    # Note: X300 doesn't require engineering_debug like 8ZSA
+
+  # ── To add a new device, copy this block: ──
+  # DM-NAX-NEW:
+  #   <<: *nax_8zone            # or *nax_4zone
   #   ip: "10.x.x.x"
   #   username: "admin"
-  #   password: "admin123"      # Default for X300 devices
-  #   model: "X300"
+  #   password: "crestron"
+  #   model: "NEW"
+  #   physical_inputs:
+  #     S1: { channels: ["S1L","S1R"], index: [0,1], type: "stream" }
+  #     T1: { channels: ["T1L","T1R"], index: [2,3], type: "stream" }
+  #     L1: { channels: ["L1L","L1R"], index: [4,5], type: "line", has_adc: true }
+  #     L2: { channels: ["L2L","L2R"], index: [6,7], type: "line", has_adc: true }
+  #   signal_generator: { channel: 0, name: "S1L" }
+  #   mixer_outputs: 8
 
-  # ── XLR device example ──
-  # DM-NAX-XLR-001:
-  #   <<: *xlr_base
-  #   ip: "10.x.x.x"
-  #   username: "admin"
-  #   password: "admin123"      # Default for X300 devices
-  #   model: "XLR"
+# Zone selection profiles for runtime filtering.
+# full mode = all zones on the device.
+# quick mode = representative subset for faster regression runs.
+zone_profiles:
+  quick:
+    DM-NAX-8ZSA: [1, 3, 5, 7]   # odd zones only — even zones (2,4) have fw bug: Bass/Treble API no-ops
+    DM-NAX-4ZSP: [1, 3]          # 4-zone device
+    DM-NAX-4ZSA: [1, 3]          # 4-zone device
+    DM-NAX-X300: [1]             # 2-zone device (residential mode)
 
+# Firmware upgrade settings
+firmware:
+  # Default firmware_dir used when a device does not define its own.
+  # On the build server the nightly drop dirs are mounted under /mnt/nightly/.
+  # On the dev machine update this to your local path.
+  firmware_dir: "/home/builduser/Linux_jstr1000/nightly_testing"
+  remote_dir: "firmware"          # remote directory on device for SFTP upload
+  # firmware_file: ""             # explicit path override (auto-detected if empty)
+  # method_override: ""           # force "imgupd" or "puf" regardless of model
+
+  # Per-device firmware directories (override firmware_dir above per model).
+  # Build server mount points:
+  #   DM-NAX-4ZSA  →  /mnt/nightly/DM-NAX-4ZSA   (.zip files)
+  #   DM-NAX-8ZSA  →  /mnt/nightly/DM-NAX         (.puf files)
+  #   DM-NAX-4ZSP  →  /mnt/nightly/DM-NAX         (.puf files)
+  firmware_dirs:
+    DM-NAX-4ZSA: "/mnt/nightly/DM-NAX-4ZSA"
+    DM-NAX-8ZSA: "/mnt/nightly/DM-NAX"
+    DM-NAX-4ZSP: "/mnt/nightly/DM-NAX"
 
 # Test execution settings
 test_settings:
   signal_settle_time_s: 1.5
-  route_settle_time_s: 0.5
+  route_settle_time_s: 0.5       # delay after AvMatrixRouting for HandleNewRoute volume reset
   level_tolerance_db: 1.0
   mute_floor_db: -110.0
   default_tone_freq_hz: 1000
   default_tone_gain_db: -20
   max_retries: 2
   retry_delay_s: 2.0
-  
-  # X300-specific timeouts
-  command_timeout_s: 10
-  reboot_timeout_s: 120
-
-
-# Firmware upgrade settings (STM32MP1 uses different update mechanism)
-firmware:
-  firmware_dir: "/mnt/nightly/DM-NAX-X300"
-  remote_dir: "firmware"
-  update_method: "x300_update"  # Different from FPGA devices
-  
-  firmware_dirs:
-    DM-NAX-X300: "/mnt/nightly/DM-NAX-X300"
-    DM-NAX-XLR: "/mnt/nightly/DM-NAX-XLR"
-    DM-NAX-BTIO: "/mnt/nightly/DM-NAX-BTIO"
-
 
 # Web dashboard settings
 dashboard:
-  enabled: true
   host: "0.0.0.0"
-  port: 5001  # Different port from FPGA test suite (5000)
-  title: "DM-NAX X300 Test Dashboard"
+  port: 5000
+  results_dir: "results"
+  max_history: 90  # days to keep
+
+# Report settings
+report:
+  company_name: "Crestron Electronics"
+  product_line: "DM-NAX"
+  logo_url: ""
