@@ -159,7 +159,7 @@ schedule:
     cron: "0 3 * * 0"             # 3:00 AM Sunday
     targets: ["DM-NAX-4ZSA", "DM-NAX-4ZSP", "DM-NAX-8ZSA"]  # "DM-NAX-X300" - disabled for now
   on_demand:
-    targets: []                   # filled at runtime via CLI
+    targets: ["DM-NAX-X300"]                   # filled at runtime via CLI
 
 # ── Email notification ────────────────────────────────────────
 # Sent after every nightly run with a link to the run index page.
