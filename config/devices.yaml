@@ -163,7 +163,7 @@ devices:
   # ── X300 STM32MP1-based devices ──
   DM-NAX-X300:
     <<: *nax_x300
-    ip: "192.168.1.175"  # X300 device IP
+    ip: "10.253.38.174"  # X300 device IP
     username: "admin"
     password: "admin123"
     model: "X300"
