@@ -24,6 +24,25 @@ import pytest
 import time
 
 
+def pytest_generate_tests(metafunc):
+    """Dynamically parametrize test_sig_routes_to_amp_output based on device amp_outputs."""
+    if "output_idx" in metafunc.fixturenames and "output_name" in metafunc.fixturenames:
+        device_cfg = metafunc.config.cache.get("device_cfg", None)
+        if not device_cfg:
+            import yaml
+            from pathlib import Path
+            cfg_path = Path(__file__).parent.parent / "config" / "devices.yaml"
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                all_devs = yaml.safe_load(f)
+            device_name = metafunc.config.getoption("--device", "DM-NAX-X300")
+            device_cfg = all_devs.get(device_name, {})
+            metafunc.config.cache.set("device_cfg", device_cfg)
+        
+        amp_outputs = device_cfg.get("amp_outputs", [])
+        output_params = [(idx, name) for idx, name in enumerate(amp_outputs)]
+        metafunc.parametrize("output_idx,output_name", output_params)
+
+
 class TestSignalRouting:
     """Verify signal path from signal generator to each output zone."""
 
@@ -85,10 +104,6 @@ class TestSignalRouting:
     # Main amp-output routing test
     # ------------------------------------------------------------------
 
-    @pytest.mark.parametrize("output_idx,output_name", [
-        (0, "A1L"), (1, "A1R"), (2, "A2L"), (3, "A2R"),
-        (4, "A3L"), (5, "A3R"), (6, "A4L"), (7, "A4R"),
-    ])
     def test_sig_routes_to_amp_output(self, dsp, cresnext, device_cfg,
                                        test_settings, output_idx, output_name):
         """Signal generator routes to each amplifier output via CresNext zone

@@ -31,7 +31,6 @@ FLATNESS_TOLERANCE_DB = 1.5   # 8kHz shows ~1.15 dB dip (DSP characteristic)
 SETTLE_TIME_S = 2.5           # Extended settle for freq-sweep accuracy
 RETRY_SETTLE_TIME_S = 3.0    # Even longer on retry
 OUTPUT_IDX = 0
-OUTPUT_NAME = "A1L"
 
 
 class TestFrequencyResponse:
@@ -41,14 +40,17 @@ class TestFrequencyResponse:
     _freq_results = {}
 
     def test_freq_response_setup(self, dsp, device_cfg, test_settings):
-        """Set up signal path: SIG → A1L and measure reference at 1 kHz."""
+        """Set up signal path: SIG → first output and measure reference at 1 kHz."""
+        # Get first output name from device config (A1 for X300, A1L for 8ZSA)
+        output_name = device_cfg.get("amp_outputs", ["A1L"])[OUTPUT_IDX]
+        
         sig_ch = device_cfg["signal_generator"]["channel"]
         dsp.start_tone(sig_ch, 1000, TONE_GAIN_DB)
         dsp.route_sig_to_output(OUTPUT_IDX, gain_db=0)
 
-        level = dsp.measure_mixer_level(OUTPUT_NAME, settle_time=SETTLE_TIME_S)
+        level = dsp.measure_mixer_level(output_name, settle_time=SETTLE_TIME_S)
         assert level > test_settings["mute_floor_db"], (
-            f"No signal at {OUTPUT_NAME}: {level} dB"
+            f"No signal at {output_name}: {level} dB"
         )
         dsp.assert_signal_presence(1, expected=True)
         TestFrequencyResponse._reference_level = level
@@ -60,13 +62,16 @@ class TestFrequencyResponse:
     @pytest.mark.parametrize("freq_hz", SWEEP_FREQUENCIES)
     def test_freq_response_at(self, dsp, device_cfg, test_settings, freq_hz):
         """Output level at {freq_hz} Hz must be within ±0.5 dB of 1 kHz reference."""
+        # Get first output name from device config (A1 for X300, A1L for 8ZSA)
+        output_name = device_cfg.get("amp_outputs", ["A1L"])[OUTPUT_IDX]
+        
         sig_ch = device_cfg["signal_generator"]["channel"]
 
         # Ensure route is set (module_reset may have cleared it)
         dsp.route_sig_to_output(OUTPUT_IDX, gain_db=0)
         dsp.start_tone(sig_ch, freq_hz, TONE_GAIN_DB)
 
-        level = dsp.measure_mixer_level(OUTPUT_NAME, settle_time=SETTLE_TIME_S)
+        level = dsp.measure_mixer_level(output_name, settle_time=SETTLE_TIME_S)
         TestFrequencyResponse._freq_results[freq_hz] = level
 
         if (
@@ -95,7 +100,7 @@ class TestFrequencyResponse:
                 freq_hz, deviation,
             )
             time.sleep(RETRY_SETTLE_TIME_S)
-            level = dsp.measure_mixer_level(OUTPUT_NAME, settle_time=0.5)
+            level = dsp.measure_mixer_level(output_name, settle_time=0.5)
             TestFrequencyResponse._freq_results[freq_hz] = level
             deviation = abs(level - ref)
 

@@ -28,10 +28,17 @@ logger = logging.getLogger(__name__)
 
 TONE_FREQ = 1000
 OUTPUT_IDX = 0
-OUTPUT_NAME = "A1L"
 
 # Drive levels to test (dB) — increasing towards 0 dBFS
 DRIVE_LEVELS = [-40, -30, -20, -12, -6, -3, 0]
+
+
+def _get_output_name(device_cfg):
+    """Get the output name for OUTPUT_IDX from device config."""
+    amp_outputs = device_cfg.get("amp_outputs", [])
+    if amp_outputs and len(amp_outputs) > OUTPUT_IDX:
+        return amp_outputs[OUTPUT_IDX]
+    return "A1L"  # Default fallback
 
 # Maximum acceptable AGC gain reduction before we call it clipping
 MAX_AGC_GAIN_REDUCTION_DB = 2.0
@@ -75,7 +82,8 @@ class TestClipping:
         dsp.start_tone(sig_ch, TONE_FREQ, drive_db)
 
         # Measure output level
-        level = dsp.measure_output_level(OUTPUT_NAME)
+        output_name = _get_output_name(device_cfg)
+        level = dsp.measure_output_level(output_name)
 
         # Verify signal presence (digital peak flag IsSignalClipping is NOT checked here —
         # at 0 dBFS the hardware peak detector correctly asserts True, which is expected
@@ -117,10 +125,11 @@ class TestClipping:
         # catches clipping/limiting plateaus better than a floor-only check.
         ref_drive_db = -20
         dsp.start_tone(sig_ch, TONE_FREQ, ref_drive_db)
-        ref_level = dsp.measure_output_level(OUTPUT_NAME)
+        output_name = _get_output_name(device_cfg)
+        ref_level = dsp.measure_output_level(output_name)
 
         dsp.start_tone(sig_ch, TONE_FREQ, drive_db)
-        level = dsp.measure_output_level(OUTPUT_NAME)
+        level = dsp.measure_output_level(output_name)
 
         # Verify signal presence (audio path alive) before cleanup
         dsp.assert_signal_presence(zone, expected=True)

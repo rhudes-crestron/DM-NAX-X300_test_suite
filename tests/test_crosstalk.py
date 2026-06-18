@@ -26,17 +26,39 @@ TONE_FREQ = 1000
 TONE_GAIN = -20
 CROSSTALK_MAX_DB = -80.0   # other channels must stay below this
 
-# Amp output pairs to test crosstalk isolation
-AMP_OUTPUTS = [
-    (0, "A1L"), (1, "A1R"), (2, "A2L"), (3, "A2R"),
-    (4, "A3L"), (5, "A3R"), (6, "A4L"), (7, "A4R"),
-]
+
+def pytest_generate_tests(metafunc):
+    """Generate test parameters dynamically based on device configuration."""
+    if "active_idx" in metafunc.fixturenames and "active_name" in metafunc.fixturenames:
+        # Get device config to determine output names
+        device_cfg = metafunc.config.cache.get("device_cfg", None)
+        if device_cfg is None:
+            # Load device config during test collection
+            import yaml
+            config_path = metafunc.config.rootdir / "config" / "devices.yaml"
+            with open(config_path) as f:
+                all_devices = yaml.safe_load(f)
+            device_name = metafunc.config.getoption("--device", default="DM-NAX-X300")
+            device_cfg = all_devices["devices"].get(device_name, {})
+            # Merge with template if specified
+            if "<<" in str(device_cfg):
+                template_name = device_cfg.get("<<", "")
+                if template_name:
+                    template = all_devices["model_templates"].get(template_name, {})
+                    merged = template.copy()
+                    merged.update(device_cfg)
+                    device_cfg = merged
+            metafunc.config.cache.set("device_cfg", device_cfg)
+        
+        # Generate (index, name) tuples from device amp_outputs
+        amp_outputs = device_cfg.get("amp_outputs", [])
+        params = [(idx, name) for idx, name in enumerate(amp_outputs)]
+        metafunc.parametrize("active_idx,active_name", params)
 
 
 class TestCrosstalk:
     """Cross-channel isolation — signal on one output must not bleed to others."""
 
-    @pytest.mark.parametrize("active_idx,active_name", AMP_OUTPUTS)
     def test_crosstalk_isolation(self, dsp, device_cfg, test_settings,
                                  active_idx, active_name):
         """Signal on {active_name} must not bleed to other amp outputs."""
@@ -75,10 +97,8 @@ class TestCrosstalk:
 
         # Verify ALL OTHER amp channels are silent
         bleed_channels = []
-        for other_idx, other_name in AMP_OUTPUTS:
+        for other_idx, other_name in enumerate(device_cfg["amp_outputs"]):
             if other_idx == active_idx:
-                continue
-            if other_name not in device_cfg["amp_outputs"]:
                 continue
             if other_name not in state.outputs:
                 continue

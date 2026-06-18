@@ -89,12 +89,22 @@ class TestEQ:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _output_info(zone):
+    def _output_info(zone, device_cfg):
         """Map zone number to (output_channel_index, output_name).
 
-        Zone N → left amp output A{N}L → DSP output channel (N-1)*2.
+        For 8ZSA stereo: Zone N → A{N}L → DSP channel (N-1)*2.
+        For X300 mono: Zone N → A{2N-1} → DSP channel (N-1)*2.
         """
-        return (zone - 1) * 2, f"A{zone}L"
+        output_idx = (zone - 1) * 2
+        amp_outputs = device_cfg.get("amp_outputs", [])
+        
+        if amp_outputs and len(amp_outputs) > output_idx:
+            out_name = amp_outputs[output_idx]
+        else:
+            # Default to 8ZSA stereo naming
+            out_name = f"A{zone}L"
+        
+        return output_idx, out_name
 
     def _setup_zone(self, dsp, cn, device_cfg, test_settings,
                     zone, freq_hz, tone_gain_db=-30):
@@ -114,7 +124,7 @@ class TestEQ:
                 f"Zone {zone} not available on {device_cfg['model']} (max {max_zones})"
             )
 
-        output_idx, output_name = self._output_info(zone)
+        output_idx, output_name = self._output_info(zone, device_cfg)
         if output_name not in device_cfg.get("amp_outputs", []):
             pytest.skip(f"{output_name} not in amp_outputs for {device_cfg['model']}")
 

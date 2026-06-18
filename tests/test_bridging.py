@@ -95,12 +95,13 @@ class TestBridging:
 
     def test_volume_works_in_standard_mode(self, dsp, device_cfg, test_settings):
         """Volume control produces signal in Standard zone configuration."""
+        output_name = device_cfg.get("amp_outputs", ["A1L"])[0]
         dsp.set_zone_volume(1, 800)
         dsp.start_sig_tone()
         dsp.route_sig_to_output(0)
         time.sleep(test_settings["signal_settle_time_s"])
 
-        level = dsp.measure_output_level("A1L")
+        level = dsp.measure_output_level(output_name)
 
         assert level > test_settings["mute_floor_db"], (
             f"No signal in Standard mode at Volume=800: {level:.1f} dB"
@@ -113,14 +114,18 @@ class TestBridging:
 
     def test_stereo_output_both_channels(self, dsp, device_cfg, test_settings):
         """Standard mode produces output on both L and R channels."""
+        amp_outputs = device_cfg.get("amp_outputs", ["A1L", "A1R"])
+        output_l = amp_outputs[0] if len(amp_outputs) > 0 else "A1L"
+        output_r = amp_outputs[1] if len(amp_outputs) > 1 else "A1R"
+        
         dsp.start_sig_tone()
-        dsp.route_sig_to_outputs([0, 1])  # A1L + A1R simultaneously
+        dsp.route_sig_to_outputs([0, 1])  # First two outputs
         time.sleep(test_settings["signal_settle_time_s"])
 
         # Read both channels in a single snapshot
-        levels = dsp.measure_output_levels_batch(["A1L", "A1R"], settle_time=0.2)
-        level_l = levels["A1L"]
-        level_r = levels["A1R"]
+        levels = dsp.measure_output_levels_batch([output_l, output_r], settle_time=0.2)
+        level_l = levels[output_l]
+        level_r = levels[output_r]
         floor = test_settings["mute_floor_db"]
 
         # Verify signal presence before cleanup

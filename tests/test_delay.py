@@ -43,13 +43,26 @@ class TestDelay:
     CATEGORY = "dsp_delay"
 
     @staticmethod
-    def _output_info(zone):
-        """Zone N → left amp output index and name (A{N}L)."""
-        return (zone - 1) * 2, f"A{zone}L"
+    def _output_info(zone, device_cfg):
+        """Zone N → left amp output index and name.
+        
+        For 8ZSA stereo: Zone N → A{N}L → DSP channel (N-1)*2.
+        For X300 mono: Zone N → A{2N-1} → DSP channel (N-1)*2.
+        """
+        output_idx = (zone - 1) * 2
+        amp_outputs = device_cfg.get("amp_outputs", [])
+        
+        if amp_outputs and len(amp_outputs) > output_idx:
+            out_name = amp_outputs[output_idx]
+        else:
+            # Default to 8ZSA stereo naming
+            out_name = f"A{zone}L"
+        
+        return output_idx, out_name
 
     def _setup_zone(self, dsp, device_cfg, zone):
         """Route signal generator to the zone's left amp output."""
-        out_idx, _ = self._output_info(zone)
+        out_idx, _ = self._output_info(zone, device_cfg)
         sig_ch = dsp.sig_ch_for_output(out_idx)
         dsp.start_tone(sig_ch, dsp.settings["default_tone_freq_hz"],
                        dsp.settings["default_tone_gain_db"])
@@ -64,7 +77,7 @@ class TestDelay:
     def test_delay_setting_accepted(self, dsp, cresnext, device_cfg, test_settings,
                                     zone, delay_ms):
         """Delay values are accepted and signal continues to pass through the zone."""
-        out_idx, out_name = self._output_info(zone)
+        out_idx, out_name = self._output_info(zone, device_cfg)
         if out_name not in device_cfg.get("amp_outputs", []):
             pytest.skip(f"{out_name} not available on {device_cfg['model']}")
 
@@ -83,7 +96,7 @@ class TestDelay:
     def test_delay_reflected_in_dsp_state(self, dsp, cresnext, device_cfg,
                                           test_settings, zone):
         """Delay value set via CresNext is reflected in the DSP state readback."""
-        out_idx, out_name = self._output_info(zone)
+        out_idx, out_name = self._output_info(zone, device_cfg)
         if out_name not in device_cfg.get("amp_outputs", []):
             pytest.skip(f"{out_name} not available on {device_cfg['model']}")
 
@@ -107,7 +120,7 @@ class TestDelay:
         (1ms and 85ms) with active signal — confirming the delay control mechanism
         changes setting correctly on the routed audio path.
         """
-        out_idx, out_name = self._output_info(zone)
+        out_idx, out_name = self._output_info(zone, device_cfg)
         if out_name not in device_cfg.get("amp_outputs", []):
             pytest.skip(f"{out_name} not available on {device_cfg['model']}")
 

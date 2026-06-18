@@ -30,11 +30,12 @@ class TestToneProfiles:
     def test_tone_profile_applies(self, dsp, device_cfg, test_settings,
                                    profile_name):
         """Each tone profile can be set without error and signal passes."""
+        output_name = device_cfg.get("amp_outputs", ["A1L"])[0]
         dsp.start_sig_tone()
         dsp.route_sig_to_output(0)
 
         self._set_profile_and_assert_readback(dsp, profile_name)
-        level = dsp.measure_output_level("A1L")
+        level = dsp.measure_output_level(output_name)
 
         assert level > test_settings["mute_floor_db"], (
             f"No signal with {profile_name} profile: {level} dB"
@@ -50,8 +51,8 @@ class TestToneProfiles:
 
     def test_profile_changes_eq(self, dsp, device_cfg, test_settings):
         """Each non-Off profile must measurably alter output at one or more frequencies."""
+        output_name = device_cfg.get("amp_outputs", ["A1L"])[0]
         sig_ch = device_cfg["signal_generator"]["channel"]
-        output_name = "A1L"
         output_idx = 0
         tone_gain = -20
         # 4000 Hz added to improve coverage of SpokenWord's vocal-presence range

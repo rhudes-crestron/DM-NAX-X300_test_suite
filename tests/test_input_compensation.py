@@ -9,20 +9,84 @@ import pytest
 import time
 
 
+def pytest_generate_tests(metafunc):
+    """Dynamically parametrize tests based on device physical inputs."""
+    if "input_ch" in metafunc.fixturenames and "input_name" in metafunc.fixturenames:
+        device_cfg = metafunc.config.cache.get("device_cfg", None)
+        if not device_cfg:
+            import yaml
+            from pathlib import Path
+            cfg_path = Path(__file__).parent.parent / "config" / "devices.yaml"
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                all_devs = yaml.safe_load(f)
+            device_name = metafunc.config.getoption("--device", "DM-NAX-X300")
+            device_cfg = all_devs.get(device_name, {})
+            metafunc.config.cache.set("device_cfg", device_cfg)
+        
+        # Extract first channel from each physical input for testing
+        physical_inputs = device_cfg.get("physical_inputs", {})
+        input_params = []
+        for input_key, input_data in physical_inputs.items():
+            channels = input_data.get("channels", [])
+            indices = input_data.get("index", [])
+            if channels and indices:
+                # Use first channel (left channel) of each input
+                # Store (input_key, indices[0], channels[0]) tuple
+                input_params.append((input_key, indices[0], channels[0]))
+        
+        if input_params:
+            # Parameters: input_key (e.g., "Input01", "S1"), input_ch (DSP channel), input_name (DSP state key)
+            metafunc.parametrize("input_key,input_ch,input_name", input_params)
+
+
 class TestInputCompensation:
     """Verify input compensation applies gain offset at the input stage."""
 
     CATEGORY = "dsp_input_compensation"
 
     @staticmethod
-    def _set_compensation(dsp, input_ch, compensation, settle_s=0.3):
-        """Set input compensation through CresNext when available."""
-        input_num = input_ch + 1
+    def _get_first_inputs(device_cfg, count=2):
+        """Get first N input keys, channels, and names from device config."""
+        physical_inputs = device_cfg.get("physical_inputs", {})
+        inputs = []
+        for input_key, input_data in physical_inputs.items():
+            channels = input_data.get("channels", [])
+            indices = input_data.get("index", [])
+            if channels and indices:
+                # Return (input_key, input_ch, input_name) tuple
+                inputs.append((input_key, indices[0], channels[0]))
+            if len(inputs) >= count:
+                break
+        return inputs
+
+    @staticmethod
+    def _set_compensation(dsp, input_key, input_ch, compensation, settle_s=0.3):
+        """Set input compensation through CresNext when available.
+        
+        Args:
+            input_key: Input identifier (e.g., "Input01", "S1") from device config
+            input_ch: DSP channel index (for legacy fallback)
+            compensation: Compensation value in dB
+        """
         if dsp.cn is not None:
-            dsp.set_input_compensation_cresnext(input_num, compensation)
+            # For X300: input_key = "Input01", "Input02"
+            # For 8ZSA: input_key = "S1", "T1", "L1", "L2"  
+            # Try to extract input number from key
+            import re
+            match = re.search(r'(\d+)', input_key)
+            if match:
+                input_num = int(match.group(1))
+            else:
+                # For non-numbered keys like "S1", "T1", use channel-based fallback
+                input_num = input_ch + 1
+            
+            # CresNext API expects compensation in 0.1 dB steps (range -100..100)
+            # So multiply dB value by 10: e.g., 5 dB -> 50, -10 dB -> -100
+            compensation_api = int(compensation * 10)
+            dsp.set_input_compensation_cresnext(input_num, compensation_api)
             time.sleep(settle_s)
             src = dsp.get_input_source_audio(input_num)
-            assert src.get("Compensation") == compensation, (
+            assert src.get("Compensation") == compensation_api, (
                 f"Input{input_num:02d} Compensation readback mismatch: {src}"
             )
             return
@@ -30,13 +94,10 @@ class TestInputCompensation:
         # Legacy fallback when CresNext is unavailable in this run setup.
         dsp.set_input_gain(input_ch, compensation)
 
-    @pytest.mark.parametrize("input_ch,input_name", [
-        (0, "S1L"), (2, "T1L"), (4, "L1L"), (6, "L2L"),
-    ])
     def test_compensation_zero_baseline(self, dsp, device_cfg, test_settings,
-                                         input_ch, input_name):
+                                         input_key, input_ch, input_name):
         """With 0dB compensation, input gain column shows 0.0."""
-        self._set_compensation(dsp, input_ch, 0)
+        self._set_compensation(dsp, input_key, input_ch, 0)
         state = dsp.read_dsp_state()
         inp = state.inputs.get(input_name)
         if inp:
@@ -53,10 +114,12 @@ class TestInputCompensation:
         rather than measuring the output, because the output level is
         affected by zone processing that can drift between reads.
         """
-        input_ch = 0   # S1L
-        input_name = "S1L"
+        inputs = self._get_first_inputs(device_cfg, 1)
+        if not inputs:
+            pytest.skip("No physical inputs configured")
+        input_key, input_ch, input_name = inputs[0]
 
-        self._set_compensation(dsp, input_ch, compensation_db)
+        self._set_compensation(dsp, input_key, input_ch, compensation_db)
         dsp.start_tone(input_ch, 1000, -20)
         time.sleep(test_settings["signal_settle_time_s"])
 
@@ -70,15 +133,11 @@ class TestInputCompensation:
             f"{inp.gain_db:.2f} (expected {compensation_db})"
         )
 
-
-    @pytest.mark.parametrize("input_ch,input_name", [
-        (0, "S1L"), (4, "L1L"),
-    ])
     def test_compensation_reflects_in_dsp_state(self, dsp, device_cfg,
                                                   test_settings,
-                                                  input_ch, input_name):
+                                                  input_key, input_ch, input_name):
         """The Gain column in DSP state reflects the compensation value."""
-        self._set_compensation(dsp, input_ch, 5)
+        self._set_compensation(dsp, input_key, input_ch, 5)
         dsp.start_tone(input_ch, 1000, -20)
 
         state = dsp.read_dsp_state()
@@ -90,39 +149,50 @@ class TestInputCompensation:
 
     def test_compensation_per_input_independent(self, dsp, device_cfg, test_settings):
         """Compensation on one input does not affect another."""
-        # Set +5dB on S1L, 0dB on T1L
-        self._set_compensation(dsp, 0, 5)
-        self._set_compensation(dsp, 2, 0)
-        dsp.start_tone(0, 1000, -20)
-        dsp.start_tone(2, 1000, -20)
+        inputs = self._get_first_inputs(device_cfg, 2)
+        if len(inputs) < 2:
+            pytest.skip("Need at least 2 inputs for independence test")
+        
+        input1_key, input1_ch, input1_name = inputs[0]
+        input2_key, input2_ch, input2_name = inputs[1]
+        
+        # Set +5dB on first input, 0dB on second input
+        self._set_compensation(dsp, input1_key, input1_ch, 5)
+        self._set_compensation(dsp, input2_key, input2_ch, 0)
+        dsp.start_tone(input1_ch, 1000, -20)
+        dsp.start_tone(input2_ch, 1000, -20)
 
         state = dsp.read_dsp_state()
-        s1l = state.inputs.get("S1L")
-        t1l = state.inputs.get("T1L")
+        inp1 = state.inputs.get(input1_name)
+        inp2 = state.inputs.get(input2_name)
 
-        if s1l and t1l:
-            assert abs(s1l.gain_db - 5.0) <= test_settings["level_tolerance_db"]
-            assert abs(t1l.gain_db - 0.0) <= test_settings["level_tolerance_db"]
+        if inp1 and inp2:
+            assert abs(inp1.gain_db - 5.0) <= test_settings["level_tolerance_db"]
+            assert abs(inp2.gain_db - 0.0) <= test_settings["level_tolerance_db"]
 
     def test_compensation_affects_audio_output_level(self, dsp, device_cfg, test_settings):
         """Input compensation must shift routed output level in the expected direction."""
-        input_ch = 0
+        inputs = self._get_first_inputs(device_cfg, 1)
+        if not inputs:
+            pytest.skip("No physical inputs configured")
+        input_key, input_ch, _ = inputs[0]
+        
         output_idx = 0
-        output_name = "A1L"
+        output_name = device_cfg.get("amp_outputs", ["A1L"])[output_idx]
 
         try:
             dsp.set_mixer(input_ch, output_idx, 0)
             dsp.start_tone(input_ch, 1000, -20)
 
             # Baseline (0 dB compensation)
-            self._set_compensation(dsp, input_ch, 0)
+            self._set_compensation(dsp, input_key, input_ch, 0)
             base_level = dsp.measure_mixer_level(output_name)
 
             # Boost and cut points
-            self._set_compensation(dsp, input_ch, 5)
+            self._set_compensation(dsp, input_key, input_ch, 5)
             boost_level = dsp.measure_mixer_level(output_name)
 
-            self._set_compensation(dsp, input_ch, -5)
+            self._set_compensation(dsp, input_key, input_ch, -5)
             cut_level = dsp.measure_mixer_level(output_name)
         finally:
             dsp.stop_tone(input_ch)

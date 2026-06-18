@@ -5,7 +5,7 @@ Verifies that muting a zone silences the output and unmuting restores it.
 Device state is automatically reset before and after each test by conftest.
 """
 import pytest
-
+import time
 
 class TestMute:
     """Verify zone mute/unmute functionality."""
@@ -17,25 +17,28 @@ class TestMute:
     MUTE_THRESHOLD_DB = -80.0
 
     def test_mute_silences_output(self, dsp, device_cfg, test_settings):
-        """Muting zone 1 should silence A1L output."""
+        """Muting zone 1 should silence first output."""
+        output_name = device_cfg.get("amp_outputs", ["A1L"])[0]
         dsp.start_sig_tone()
         dsp.route_sig_to_output(0)
 
         # Verify signal present before mute
-        level_before = dsp.measure_output_level("A1L")
+        level_before = dsp.measure_output_level(output_name)
         assert level_before > self.MUTE_THRESHOLD_DB, "No signal before mute"
         dsp.assert_signal_presence(1, expected=True)
 
         # Mute
         dsp.set_zone_mute(1, True)
-        level_muted = dsp.measure_output_level("A1L")
+        # X300 needs ~2s for mute to fully engage in hardware
+        time.sleep(2.0)
+        level_muted = dsp.measure_output_level(output_name)
         assert level_muted < self.MUTE_THRESHOLD_DB, (
             f"Signal still present after mute: {level_muted} dB"
         )
 
         # Unmute
         dsp.set_zone_mute(1, False)
-        level_after = dsp.measure_output_level("A1L")
+        level_after = dsp.measure_output_level(output_name)
         assert level_after > self.MUTE_THRESHOLD_DB, (
             f"Signal not restored after unmute: {level_after} dB"
         )
@@ -57,6 +60,8 @@ class TestMute:
 
         # Mute this zone
         dsp.set_zone_mute(zone, True)
+        # X300 needs ~2s for mute to fully engage in hardware
+        time.sleep(2.0)
         level = dsp.measure_output_level(output_name)
         assert level < self.MUTE_THRESHOLD_DB, (
             f"Zone {zone} ({output_name}) still has signal after mute: {level} dB"

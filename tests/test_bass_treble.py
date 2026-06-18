@@ -43,9 +43,22 @@ class TestBassTreble:
     CATEGORY = "dsp_bass_treble"
 
     @staticmethod
-    def _output_info(zone):
-        """Zone N → left amp output index and name (A{N}L)."""
-        return (zone - 1) * 2, f"A{zone}L"
+    def _output_info(zone, device_cfg):
+        """Zone N → left amp output index and name.
+        
+        For 8ZSA stereo: Zone 1 = A1L, Zone 2 = A2L, etc.
+        For X300 mono: Zone 1 = A1, Zone 2 = A3, etc.
+        """
+        output_idx = (zone - 1) * 2
+        amp_outputs = device_cfg.get("amp_outputs", [])
+        
+        if amp_outputs and len(amp_outputs) > output_idx:
+            out_name = amp_outputs[output_idx]
+        else:
+            # Default to 8ZSA stereo naming
+            out_name = f"A{zone}L"
+        
+        return output_idx, out_name
 
     def _setup_zone(self, dsp, device_cfg, zone, freq_hz):
         """Route signal tone to the zone's left amp output.
@@ -54,7 +67,7 @@ class TestBassTreble:
               then mixer delivers the tone to the output measurement point.
         fw21: tone on dsp.sig_ch (ch28=SIG), routed via dsp mix into zone chain.
         """
-        out_idx, _ = self._output_info(zone)
+        out_idx, _ = self._output_info(zone, device_cfg)
         sig_ch = dsp.sig_ch_for_output(out_idx)
         dsp.start_tone(sig_ch, freq_hz, -20)
         model = str(device_cfg.get("model", "")).upper()
@@ -77,7 +90,7 @@ class TestBassTreble:
     def test_bass_changes_level(self, dsp, cresnext, device_cfg, test_settings,
                                 zone, bass_value, direction):
         """Bass boost/cut changes the output level for a low-frequency tone."""
-        out_idx, out_name = self._output_info(zone)
+        out_idx, out_name = self._output_info(zone, device_cfg)
         if out_name not in device_cfg.get("amp_outputs", []):
             pytest.skip(f"{out_name} not available on {device_cfg['model']}")
 
@@ -115,7 +128,7 @@ class TestBassTreble:
     def test_treble_changes_level(self, dsp, cresnext, device_cfg, test_settings,
                                   zone, treble_value, direction):
         """Treble boost/cut changes the output level for a high-frequency tone."""
-        out_idx, out_name = self._output_info(zone)
+        out_idx, out_name = self._output_info(zone, device_cfg)
         if out_name not in device_cfg.get("amp_outputs", []):
             pytest.skip(f"{out_name} not available on {device_cfg['model']}")
 

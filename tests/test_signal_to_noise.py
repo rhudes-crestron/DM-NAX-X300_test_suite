@@ -31,17 +31,39 @@ MIN_SNR_DB = 70.0            # signal - noise must exceed this
 TONE_FREQ = 1000
 TONE_GAIN = -20
 
-# Amp output channels (index, name)
-AMP_OUTPUTS = [
-    (0, "A1L"), (1, "A1R"), (2, "A2L"), (3, "A2R"),
-    (4, "A3L"), (5, "A3R"), (6, "A4L"), (7, "A4R"),
-]
+
+def pytest_generate_tests(metafunc):
+    """Generate test parameters dynamically based on device configuration."""
+    if "out_idx" in metafunc.fixturenames and "out_name" in metafunc.fixturenames:
+        # Get device config to determine output names
+        device_cfg = metafunc.config.cache.get("device_cfg", None)
+        if device_cfg is None:
+            # Load device config during test collection
+            import yaml
+            config_path = metafunc.config.rootdir / "config" / "devices.yaml"
+            with open(config_path) as f:
+                all_devices = yaml.safe_load(f)
+            device_name = metafunc.config.getoption("--device", default="DM-NAX-X300")
+            device_cfg = all_devices["devices"].get(device_name, {})
+            # Merge with template if specified
+            if "<<" in str(device_cfg):
+                template_name = device_cfg.get("<<", "")
+                if template_name:
+                    template = all_devices["model_templates"].get(template_name, {})
+                    merged = template.copy()
+                    merged.update(device_cfg)
+                    device_cfg = merged
+            metafunc.config.cache.set("device_cfg", device_cfg)
+        
+        # Generate (index, name) tuples from device amp_outputs
+        amp_outputs = device_cfg.get("amp_outputs", [])
+        params = [(idx, name) for idx, name in enumerate(amp_outputs)]
+        metafunc.parametrize("out_idx,out_name", params)
 
 
 class TestSignalToNoise:
     """Signal-to-noise ratio and noise floor verification."""
 
-    @pytest.mark.parametrize("out_idx,out_name", AMP_OUTPUTS)
     def test_noise_floor(self, dsp, device_cfg, out_idx, out_name):
         """Idle output {out_name} noise floor must be below -90 dB."""
         if out_name not in device_cfg["amp_outputs"]:
@@ -60,7 +82,6 @@ class TestSignalToNoise:
             f"(max {NOISE_FLOOR_MAX_DB} dB)"
         )
 
-    @pytest.mark.parametrize("out_idx,out_name", AMP_OUTPUTS)
     def test_snr(self, dsp, device_cfg, out_idx, out_name):
         """SNR on {out_name} must exceed 70 dB."""
         if out_name not in device_cfg["amp_outputs"]:

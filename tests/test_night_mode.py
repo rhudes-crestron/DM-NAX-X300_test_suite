@@ -18,11 +18,14 @@ class TestNightMode:
     def test_night_mode_applies(self, dsp, device_cfg, test_settings,
                                  mode_name):
         """Each night mode setting can be applied and signal passes."""
+        # Use first output from device config (A1 for X300, A1L for 8ZSA)
+        out_name = device_cfg.get("amp_outputs", ["A1L"])[0]
+        
         dsp.start_sig_tone()
         dsp.route_sig_to_output(0)
 
         dsp.set_zone_night_mode(1, mode_name)
-        level = dsp.measure_output_level("A1L")
+        level = dsp.measure_output_level(out_name)
 
         assert level > test_settings["mute_floor_db"], (
             f"No signal with night mode {mode_name}: {level} dB"
@@ -31,6 +34,9 @@ class TestNightMode:
 
     def test_night_mode_reduces_dynamic_range(self, dsp, device_cfg, test_settings):
         """Higher night mode should compress (reduce) loud signals more."""
+        # Use first output from device config (A1 for X300, A1L for 8ZSA)
+        out_name = device_cfg.get("amp_outputs", ["A1L"])[0]
+        
         sig_ch = device_cfg["signal_generator"]["channel"]
         dsp.start_tone(sig_ch, 1000, -6)
         dsp.route_sig_to_output(0)
@@ -38,7 +44,7 @@ class TestNightMode:
         levels = {}
         for mode_name in ["Off", "Low", "Medium", "High"]:
             dsp.set_zone_night_mode(1, mode_name)
-            levels[mode_name] = dsp.measure_output_level("A1L")
+            levels[mode_name] = dsp.measure_output_level(out_name)
 
         tol = float(test_settings["level_tolerance_db"])
         if levels["Off"] > test_settings["mute_floor_db"]:

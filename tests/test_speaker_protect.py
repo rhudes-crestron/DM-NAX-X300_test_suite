@@ -30,16 +30,42 @@ class TestSpeakerProtect:
     CATEGORY = "dsp_speaker_protect"
 
     @staticmethod
-    def _output_info(zone):
-        return (zone - 1) * 2, f"A{zone}L"
+    def _output_info(zone, device_cfg):
+        """Get output index and name for a zone.
+        
+        Handles both stereo naming (A1L/A2L for zones 1,2) and 
+        mono naming (A1/A3 for zones 1,2).
+        """
+        amp_outputs = device_cfg.get("amp_outputs", [])
+        out_name_stereo = f"A{zone}L"
+        
+        # For mono naming: zone 1 = A1/A2, zone 2 = A3/A4
+        out_name_mono = f"A{(zone-1)*2 + 1}"
+        
+        # Determine which naming scheme is in use
+        if out_name_stereo in amp_outputs:
+            return (zone - 1) * 2, out_name_stereo
+        elif out_name_mono in amp_outputs:
+            return (zone - 1) * 2, out_name_mono
+        else:
+            # Fallback to stereo for backwards compatibility
+            return (zone - 1) * 2, out_name_stereo
 
     @staticmethod
     def _require_zone(device_cfg, zone):
         if zone > device_cfg.get("zones", 4):
             pytest.skip(f"Zone {zone} not available")
-        out_name = f"A{zone}L"
-        if out_name not in device_cfg.get("amp_outputs", []):
-            pytest.skip(f"{out_name} not available on {device_cfg['model']}")
+        
+        # Handle both stereo naming (A1L/A1R) and mono naming (A1/A2)
+        amp_outputs = device_cfg.get("amp_outputs", [])
+        out_name_stereo = f"A{zone}L"
+        
+        # For mono naming: zone 1 = A1/A2, zone 2 = A3/A4, etc.
+        out_name_mono = f"A{(zone-1)*2 + 1}"
+        
+        # Check if either stereo or mono naming exists
+        if out_name_stereo not in amp_outputs and out_name_mono not in amp_outputs:
+            pytest.skip(f"Zone {zone} output not available on {device_cfg['model']}")
 
     @pytest.mark.parametrize("zone", ALL_ZONES)
     def test_speaker_protect_supported(self, dsp, device_cfg, test_settings, zone):
@@ -133,7 +159,7 @@ class TestSpeakerProtect:
     def test_speaker_protect_does_not_kill_signal(self, dsp, device_cfg, test_settings, zone):
         """Enabling speaker protection doesn't silence normal-level output."""
         self._require_zone(device_cfg, zone)
-        out_idx, out_name = self._output_info(zone)
+        out_idx, out_name = self._output_info(zone, device_cfg)
 
         dsp.start_sig_tone()
         dsp.route_sig_to_output(out_idx)
@@ -165,7 +191,7 @@ class TestSpeakerProtect:
         """
         self._require_zone(device_cfg, zone)
         cn = dsp.cn
-        out_idx, out_name = self._output_info(zone)
+        out_idx, out_name = self._output_info(zone, device_cfg)
 
         # Drive a loud tone
         dsp.start_sig_tone(gain_db=-6)

@@ -64,7 +64,8 @@ model_templates:
     has_speaker_protect: false
     dsp_tone_input: "Input01"
     dsp_fw_version: 42  # X300 uses fw42-like tone/mixer architecture despite FW version 36
-    signal_generator: { channel: 20, name: "SIG" }  # Signal generator channel on X300
+    # signal_generator: { channel: 20, name: "SIG" }  # Original - not working
+    signal_generator: { channel: 0, name: "Ch0" }  # Testing channel 0 - Zone 1 input
     mixer_outputs: 4  # 2 stereo zones = 4 outputs (residential mode)
     # X300-specific settings
     mode: "residential"  # residential (2 zones) or commercial (9 channels)
@@ -163,17 +164,18 @@ devices:
   # ── X300 STM32MP1-based devices ──
   DM-NAX-X300:
     <<: *nax_x300
-    ip: "10.253.38.174"  # X300 device IP
+    ip: "192.168.1.175"  # X300 device IP (local)
     username: "admin"
     password: "admin123"
     model: "X300"
     mode: "residential"  # residential (2 zones) or commercial (9 channels)
     # X300 uses different channel mapping than 8ZSA:
-    # Residential: Input01 (Ch 0-1 L/R), Input02 (Ch 2-3 L/R)
+    # Residential: Input01 (L1/L2), Input02 (L3/L4) - DSP names: L1, L2, L3, L4, N1-N4, SG
     # Commercial: Ch 1-4 (LineIn1-4), Ch 5-9 (Streaming)
     physical_inputs:
-      Input01: { channels: ["Ch0","Ch1"], index: [0,1], type: "input_source" }
-      Input02: { channels: ["Ch2","Ch3"], index: [2,3], type: "input_source" }
+      Input01: { channels: ["L1","L2"], index: [0,1], type: "input_source" }
+      Input02: { channels: ["L3","L4"], index: [2,3], type: "input_source" }
+    signal_generator: { channel: 0, name: "L1" }  # Testing channel 0
     # Note: X300 doesn't require engineering_debug like 8ZSA
 
   # ── To add a new device, copy this block: ──

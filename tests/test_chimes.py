@@ -19,9 +19,20 @@ class TestChimes:
 
     CATEGORY = "dsp_chimes"
 
+    @staticmethod
+    def _check_chime_support(device_cfg):
+        """Skip test if device doesn't support chimes (e.g., X300 residential)."""
+        model = device_cfg.get("model", "").upper()
+        controller_type = device_cfg.get("controller_type", "").lower()
+        
+        # X300 residential mode doesn't have chime functionality
+        if "X300" in model or controller_type == "x300":
+            pytest.skip(f"Chimes not supported on {model} (residential mode)")
+
     @pytest.mark.parametrize("zone", ALL_ZONES)
     def test_chime_zone_enable(self, dsp, device_cfg, test_settings, zone):
         """Enabling a zone for chime playback is reflected in readback."""
+        self._check_chime_support(device_cfg)
         if zone > device_cfg.get("zones", 4):
             pytest.skip(f"Zone {zone} not available")
 
@@ -40,6 +51,7 @@ class TestChimes:
     @pytest.mark.parametrize("zone", ALL_ZONES)
     def test_chime_zone_disable(self, dsp, device_cfg, test_settings, zone):
         """Disabling a zone for chime playback is reflected in readback."""
+        self._check_chime_support(device_cfg)
         if zone > device_cfg.get("zones", 4):
             pytest.skip(f"Zone {zone} not available")
 
@@ -58,6 +70,7 @@ class TestChimes:
     @pytest.mark.parametrize("zone", ALL_ZONES)
     def test_chime_play_trigger(self, dsp, device_cfg, test_settings, zone):
         """Chime playback can be triggered and PlaybackInProgress becomes True."""
+        self._check_chime_support(device_cfg)
         if zone > device_cfg.get("zones", 4):
             pytest.skip(f"Zone {zone} not available")
         cn = dsp.cn
@@ -86,6 +99,7 @@ class TestChimes:
     @pytest.mark.parametrize("zone", ALL_ZONES)
     def test_chime_produces_audio(self, dsp, device_cfg, test_settings, zone):
         """Chime playback produces measurable audio on the zone output (dsp output_db)."""
+        self._check_chime_support(device_cfg)
         if zone > device_cfg.get("zones", 4):
             pytest.skip(f"Zone {zone} not available")
 
@@ -118,6 +132,7 @@ class TestChimes:
     @pytest.mark.parametrize("zone", ALL_ZONES)
     def test_announcing_volume_readback(self, dsp, device_cfg, test_settings, zone):
         """Announcing volume can be set and read back."""
+        self._check_chime_support(device_cfg)
         if zone > device_cfg.get("zones", 4):
             pytest.skip(f"Zone {zone} not available")
 
@@ -139,6 +154,7 @@ class TestChimes:
 
     def test_chime_multi_zone(self, dsp, device_cfg, test_settings):
         """Chime can be enabled on multiple zones simultaneously."""
+        self._check_chime_support(device_cfg)
         cn = dsp.cn
         zones = device_cfg.get("selected_zones", list(range(1, device_cfg.get("zones", 4) + 1)))
 

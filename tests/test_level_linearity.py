@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 TONE_FREQ = 1000
 OUTPUT_IDX = 0
-OUTPUT_NAME = "A1L"
 
 # Input drive levels to test linearity across dynamic range
 DRIVE_LEVELS = [-60, -50, -40, -30, -20, -10, -6]
@@ -40,12 +39,13 @@ class TestLevelLinearity:
     @pytest.mark.parametrize("drive_db", DRIVE_LEVELS)
     def test_measure_level_at(self, dsp, device_cfg, test_settings, drive_db):
         """Measure output level at {drive_db} dB input."""
+        output_name = device_cfg.get("amp_outputs", ["A1L"])[OUTPUT_IDX]
         sig_ch = device_cfg["signal_generator"]["channel"]
 
         dsp.route_sig_to_output(OUTPUT_IDX, gain_db=0)
         dsp.start_tone(sig_ch, TONE_FREQ, drive_db)
 
-        level = dsp.measure_mixer_level(OUTPUT_NAME)
+        level = dsp.measure_mixer_level(output_name)
 
         # Verify signal presence on the zone (before cleanup)
         dsp.assert_signal_presence(1, expected=True)
