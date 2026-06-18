@@ -154,10 +154,10 @@ test_targets:
 schedule:
   nightly:
     cron: "0 1 * * *"             # 1:00 AM daily
-    targets: ["DM-NAX-4ZSA", "DM-NAX-4ZSP", "DM-NAX-8ZSA"]  # "DM-NAX-X300" - disabled for now
+    targets: ["DM-NAX-4ZSA", "DM-NAX-4ZSP", "DM-NAX-8ZSA", "DM-NAX-X300"]
   weekly_full:
     cron: "0 3 * * 0"             # 3:00 AM Sunday
-    targets: ["DM-NAX-4ZSA", "DM-NAX-4ZSP", "DM-NAX-8ZSA"]  # "DM-NAX-X300" - disabled for now
+    targets: ["DM-NAX-4ZSA", "DM-NAX-4ZSP", "DM-NAX-8ZSA", "DM-NAX-X300"]
   on_demand:
     targets: ["DM-NAX-X300"]                   # filled at runtime via CLI
 
